@@ -41,6 +41,7 @@
     destroy() {
       clearTimeout(this.sendTimer);
       cancelAnimationFrame(this.raf);
+      this.closeModal();
     }
 
     update(v) {
@@ -84,9 +85,56 @@
     }
 
     endAnim() {
+      const r = this.anim?.r;
       cancelAnimationFrame(this.raf);
       this.anim = null;
       if (this.v) this.renderMap(this.v);
+      if (r) this.showBreaches(r);
+    }
+
+    // 条約破りがあったラウンドは、動きの再生のあとにモーダルで知らせる(1ラウンド1回)
+    showBreaches(r) {
+      if (!r.breaches?.length || this.breachShown === r.round) return;
+      this.breachShown = r.round;
+      const e = this.esc;
+      const myId = this.v.me?.nation;
+      const nm = (id) => e(this.nation(id)?.title ?? '?');
+      const items = r.breaches
+        .map((b) => {
+          const mine = b.a === myId || b.b === myId;
+          const personal =
+            b.kind === 'surprise'
+              ? b.b === myId ? '<p class="gk-br-me">あなたが裏切られました</p>' : b.a === myId ? '<p class="gk-br-me">あなたの奇襲です</p>' : ''
+              : mine ? '<p class="gk-br-me">あなたも相手も約束を破りました</p>' : '';
+          return b.kind === 'surprise'
+            ? `<div class="gk-br"><p class="gk-br-stamp">裏切り!</p><p><strong>${nm(b.a)}</strong>が<strong>${nm(b.b)}</strong>との条約を破って奇襲した</p><small>奇襲した側の攻撃に兵力+2</small>${personal}</div>`
+            : `<div class="gk-br"><p class="gk-br-stamp is-mutual">共倒れ!</p><p><strong>${nm(b.a)}</strong>と<strong>${nm(b.b)}</strong>が互いに条約を破った</p><small>両国とも次の増援が2減る</small>${personal}</div>`;
+        })
+        .join('');
+      this.closeModal();
+      const wrap = document.createElement('div');
+      wrap.className = 'mn-modal';
+      wrap.innerHTML = `
+        <div class="mn-modal-card gk-br-card" role="dialog" aria-modal="true" aria-label="条約破り">
+          <span class="event-label">第${r.round}ラウンド・条約破り</span>
+          ${items}
+          <button class="btn btn-primary btn-block" data-close>閉じる</button>
+        </div>`;
+      wrap.addEventListener('click', (ev) => {
+        if (ev.target === wrap || ev.target.closest('[data-close]')) this.closeModal();
+      });
+      this.onKey = (ev) => { if (ev.key === 'Escape') this.closeModal(); };
+      document.addEventListener('keydown', this.onKey);
+      document.body.appendChild(wrap);
+      this.modal = wrap;
+      wrap.querySelector('[data-close]').focus();
+    }
+
+    closeModal() {
+      if (this.onKey) document.removeEventListener('keydown', this.onKey);
+      this.onKey = null;
+      this.modal?.remove();
+      this.modal = null;
     }
 
     drawFx(t) {
@@ -228,6 +276,7 @@
       this.root.querySelector('#gk-orders').addEventListener('click', (e) => this.onOrders(e));
       this.root.querySelector('#gk-last').addEventListener('click', (e) => {
         if (e.target.closest('[data-replay]') && this.v.lastResult) {
+          this.breachShown = null;
           this.startAnim(this.v.lastResult);
           this.renderMap(this.v);
           this.root.querySelector('#gk-map').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -356,15 +405,34 @@
       const my = this.my();
       if (v.phase === 'ended') {
         const r = v.result;
-        const rows = [...v.nations].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+        const instant = r.kind === 'instant';
+        const val = {
+          score: (n) => n.score,
+          stars: (n) => n.stars,
+          lands: (n) => n.lands,
+          troops: (n) => n.troops,
+        };
+        // 決め方の順に並べ替える(即勝利のときは、ラインに届いた国を先に)
+        const reached = new Set(r.reached || []);
+        const rows = [...v.nations].sort((a, b) => {
+          if (instant && reached.has(a.id) !== reached.has(b.id)) return reached.has(a.id) ? -1 : 1;
+          for (const o of r.order) if (val[o.key](b) !== val[o.key](a)) return val[o.key](b) - val[o.key](a);
+          return 0;
+        });
+        const cols = instant ? ['stars', 'lands', 'troops'] : ['score', 'stars', 'lands', 'troops'];
+        const head = { score: '点', stars: '★', lands: '領地', troops: '兵' };
+        const decisive = r.decidedBy;
         el.innerHTML = `
           <h2 class="kt-result">${r.winners.map((id) => e(this.nation(id).title)).join('・')}の勝ち</h2>
-          <p class="kt-result-sub">${r.kind === 'instant' ? `★を${v.winStars}つ押さえて即勝利` : '全ラウンド終了。★+秘密の目標で決着'}</p>
+          <p class="kt-result-sub">${instant ? `★${v.winStars}つに届いて即勝利` : '全ラウンド終了'}${e(r.text || '')}</p>
           <table class="gk-table">
-            <thead><tr><th>国</th><th>★</th><th>目標</th><th>点</th></tr></thead>
-            <tbody>${rows.map((n) => `<tr class="${r.winners.includes(n.id) ? 'is-win' : ''}"><td><i class="dot" style="background:${n.color}"></i>${e(n.title)}${n.cpu ? '<small>CPU</small>' : ''}</td><td class="num">${n.stars}</td>
-              <td>${n.objective ? `<span class="${n.objective.done ? 'ok' : 'ng'}">${n.objective.done ? '達成' : '未達'}</span><small>${e(n.objective.text)}</small>` : '—'}</td><td class="num">${n.score}</td></tr>`).join('')}</tbody>
+            <thead><tr><th>国</th>${cols.map((c) => `<th class="num${c === decisive ? ' is-key' : ''}">${head[c]}</th>`).join('')}${v.objectivesOn ? '<th>目標</th>' : ''}</tr></thead>
+            <tbody>${rows.map((n) => `<tr class="${r.winners.includes(n.id) ? 'is-win' : ''}${instant && !reached.has(n.id) ? ' is-out' : ''}">
+              <td><i class="dot" style="background:${n.color}"></i>${e(n.title)}${n.cpu ? '<small>CPU</small>' : ''}</td>
+              ${cols.map((c) => `<td class="num${c === decisive ? ' is-key' : ''}">${val[c](n)}</td>`).join('')}
+              ${v.objectivesOn ? `<td>${n.objective ? `<span class="${n.objective.done ? 'ok' : 'ng'}">${n.objective.done ? '達成+2' : '未達'}</span><small>${e(n.objective.text)}</small>` : '—'}</td>` : ''}</tr>`).join('')}</tbody>
           </table>
+          <p class="kt-note">決め方:${instant ? '即勝利ラインに届いた国のうち、' : ''}${r.order.map((o) => e(o.label)).join(' → ')} の順に比べ、最後まで同じなら同率で勝ち。${instant ? '(ラインに届かなかった国は薄く表示)' : ''}</p>
           ${this.api.isHost() ? '<button class="btn btn-primary btn-block" data-act="finish">ロビーに戻る</button>' : '<p class="hint wait">ホストがロビーに戻すのを待っています</p>'}`;
         return;
       }
@@ -497,6 +565,14 @@
           <li><i class="dot" style="background:${n.color}"></i><span class="player-name">${e(n.title)}${n.cpu ? '<small class="gk-leader">CPU</small>' : ''}</span>
             <span class="kt-tickets">★${n.stars}・領地${n.lands}・兵${n.troops}${n.broken ? `・破約${n.broken}` : ''}</span>
             ${v.phase === 'orders' ? (n.ready ? '<span class="tag tag-done">確定</span>' : '<span class="tag">考え中</span>') : ''}</li>`).join('')}</ul>
+        <details class="gk-rules">
+          <summary>勝敗の決め方</summary>
+          <ul>
+            <li><strong>即勝利</strong>:ラウンドの解決後に★が${v.winStars}つ以上ある国があれば、その時点で終了。同じラウンドに複数の国が届いたら、${v.rules.instant.map((x) => e(x)).join(' → ')}の順に比べて多い国の勝ち。</li>
+            <li><strong>最終ラウンド後</strong>:全部の国を${v.rules.final.map((x) => e(x)).join(' → ')}の順に比べて多い国の勝ち。</li>
+            <li>最後まで同じなら同率で勝ち。★や領地は、そのラウンドの戦闘と増援が終わったあとの数で数えます。</li>
+          </ul>
+        </details>
         ${v.objectivesOn && v.me?.objective && v.phase !== 'ended' ? `<div class="gk-obj"><strong>あなたの秘密の目標(+2点)</strong><p>${e(v.me.objective.text)}</p><small>${v.me.objective.done ? '今は達成しています' : '今は未達成'}</small></div>` : ''}
         ${my ? '' : ''}`;
     }

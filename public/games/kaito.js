@@ -4,6 +4,9 @@
   const TRANSPORT = { walk: '徒歩', bus: 'バス', subway: '地下鉄', hidden: '変装' };
   const TYPE_ORDER = { walk: 0, bus: 1, subway: 2 };
   const SVGNS = 'http://www.w3.org/2000/svg';
+  // 移動の再生のタイミング(ミリ秒)。怪盗の高飛びは2区間を続けて動く
+  const FX = { LEG: 900, EVENT: 1100 };
+  const BEND = { walk: 0, bus: 18, subway: 40 };
 
   class KaitoClient {
     constructor(root, api) {
@@ -14,7 +17,9 @@
       this.sel = null; // 探偵: {to,type} / 怪盗: {legs:[{to,type}], disguise, double}
     }
 
-    destroy() {}
+    destroy() {
+      cancelAnimationFrame(this.raf);
+    }
 
     update(v) {
       const prev = this.v;
@@ -26,7 +31,111 @@
         this.resetSelection(v);
         this.build(v);
       }
+      // ターンが解決したら、そのターンの動きを地図の上で再生する
+      const m = v.lastMove;
+      if (m && this.animTurn !== m.turn && (m.turn === v.turn - 1 || v.phase === 'ended')) {
+        this.animTurn = m.turn;
+        this.startAnim(m);
+      }
       this.refresh(v);
+    }
+
+    // ---------- 移動の再生 ----------
+    travelEnd(m) {
+      return FX.LEG * Math.max(1, m.thiefLegs?.length || 1);
+    }
+
+    startAnim(m) {
+      cancelAnimationFrame(this.raf);
+      // 「動きを減らす」設定の人には、矢印と結果だけを止めた絵で見せる
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      this.anim = { m, t0: performance.now(), reduced };
+      this.landed = reduced;
+      const total = this.travelEnd(m) + FX.EVENT + (reduced ? 1000 : 200);
+      const loop = () => {
+        if (!this.anim) return;
+        const t = performance.now() - this.anim.t0;
+        if (t >= total) return this.endAnim();
+        if (!this.landed && t >= this.travelEnd(m)) {
+          this.landed = true;
+          this.renderMap(this.v);
+        }
+        this.drawFx(t);
+        this.raf = requestAnimationFrame(loop);
+      };
+      this.raf = requestAnimationFrame(loop);
+    }
+
+    endAnim() {
+      cancelAnimationFrame(this.raf);
+      this.anim = null;
+      if (this.v) this.renderMap(this.v);
+    }
+
+    // 道の形(バスと地下鉄は弧)に沿った位置
+    pointOn(from, to, type, k) {
+      const N = this.v.map.nodes;
+      const e = this.v.map.edges.find((x) => x.type === type && ((x.a === from && x.b === to) || (x.a === to && x.b === from)));
+      const a = N[e ? e.a : from];
+      const b = N[e ? e.b : to];
+      const kk = e && e.a !== from ? 1 - k : k;
+      const bend = BEND[type] || 0;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const c = { x: (a.x + b.x) / 2 - (dy / len) * bend, y: (a.y + b.y) / 2 + (dx / len) * bend };
+      const u = 1 - kk;
+      return { x: u * u * a.x + 2 * u * kk * c.x + kk * kk * b.x, y: u * u * a.y + 2 * u * kk * c.y + kk * kk * b.y };
+    }
+
+    drawFx(t) {
+      const fx = this.root.querySelector('#kt-fx');
+      if (!fx || !this.anim) return;
+      const v = this.v;
+      const { m, reduced } = this.anim;
+      const N = v.map.nodes;
+      const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+      const out = [];
+      const end = this.travelEnd(m);
+      const color = (id) => v.detectives.find((d) => d.id === id)?.color || '#15211d';
+      const letter = (id) => this.esc([...(v.detectives.find((d) => d.id === id)?.name || '?')][0]);
+
+      if (reduced) {
+        // 止めた絵:どこからどこへ動いたかを矢印で
+        for (const d of m.detectives) out.push(this.arrow(d.from, d.to, d.type, color(d.id)));
+        for (const l of m.thiefLegs || []) out.push(this.arrow(l.from, l.to, l.type, '#c8323c'));
+      } else if (t < end) {
+        for (const d of m.detectives) {
+          const p = this.pointOn(d.from, d.to, d.type, ease(Math.min(1, t / FX.LEG)));
+          out.push(`<g class="fx-piece"><circle cx="${p.x}" cy="${p.y}" r="12" fill="${color(d.id)}"/><text x="${p.x}" y="${p.y + 5}">${letter(d.id)}</text></g>`);
+        }
+        (m.thiefLegs || []).forEach((l, i) => {
+          const k = (t - i * FX.LEG) / FX.LEG;
+          if (k < 0 || (k > 1 && i < m.thiefLegs.length - 1)) return;
+          const p = this.pointOn(l.from, l.to, l.type, ease(Math.min(1, k)));
+          out.push(`<g class="fx-piece fx-thief"><circle cx="${p.x}" cy="${p.y}" r="13"/><text x="${p.x}" y="${p.y + 5}">怪</text></g>`);
+        });
+      }
+
+      // そのターンの出来事:確保・盗難・目撃
+      if (reduced || t >= end * 0.85) {
+        const p = reduced ? 0.5 : Math.min(1, (t - end * 0.85) / FX.EVENT);
+        const at = m.revealed;
+        if (at !== null && at !== undefined) {
+          const n = N[at];
+          const label = m.captured ? '確保!' : m.stolen ? '盗難!' : '目撃!';
+          out.push(`<circle class="fx-burst" cx="${n.x}" cy="${n.y}" r="${24 + p * 22}" style="opacity:${1 - p * 0.7}"/>`);
+          out.push(`<text class="fx-label" x="${n.x}" y="${n.y - 50 < 20 ? n.y + 66 : n.y - 50}">${label}</text>`);
+        }
+      }
+      out.push(`<g class="fx-banner"><rect x="${v.map.width / 2 - 115}" y="6" width="230" height="30" rx="15"/><text x="${v.map.width / 2}" y="27">${m.turn}ターン目の動き(タップで飛ばす)</text></g>`);
+      fx.innerHTML = out.join('');
+    }
+
+    arrow(from, to, type, color) {
+      const pts = [0, 0.25, 0.5, 0.75, 0.9].map((k) => this.pointOn(from, to, type, k));
+      const d = `M${pts.map((p) => `${p.x},${p.y}`).join(' L')}`;
+      return `<path class="fx-arrow" d="${d}" stroke="${color}"/><circle class="fx-arrow-head" cx="${pts[4].x}" cy="${pts[4].y}" r="6" fill="${color}"/>`;
     }
 
     buildAdj(v) {
@@ -105,7 +214,7 @@
         const g = el.closest('[data-node]');
         if (g) this.pickNode(Number(g.dataset.node));
       };
-      svg.addEventListener('click', (ev) => choose(ev.target));
+      svg.addEventListener('click', (ev) => (this.anim ? this.endAnim() : choose(ev.target)));
       svg.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
           ev.preventDefault();
@@ -114,6 +223,13 @@
       });
 
       this.root.querySelector('#kt-control').addEventListener('click', (ev) => this.onControl(ev));
+      this.root.querySelector('#kt-log').addEventListener('click', (ev) => {
+        if (ev.target.closest('[data-replay]') && this.v.lastMove) {
+          this.startAnim(this.v.lastMove);
+          this.renderMap(this.v);
+          this.root.querySelector('#kt-map').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
       this.root.querySelector('#kt-control').addEventListener('change', (ev) => {
         if (ev.target.id === 'kt-tip-node') this.tipNode = ev.target.value;
       });
@@ -198,11 +314,12 @@
         const [dx, dy] = SLOTS[i % SLOTS.length];
         return { x: n.x + dx, y: n.y + dy };
       };
-      if (v.thief.node !== null && v.thief.node !== undefined) {
+      const travelling = this.anim && !this.anim.reduced && performance.now() - this.anim.t0 < this.travelEnd(this.anim.m);
+      if (!travelling && v.thief.node !== null && v.thief.node !== undefined) {
         const p = place(v.thief.node);
         parts.push(`<g class="piece piece-thief"><circle cx="${p.x}" cy="${p.y}" r="12"/><text x="${p.x}" y="${p.y + 5}">怪</text></g>`);
       }
-      for (const d of v.detectives) {
+      for (const d of travelling ? [] : v.detectives) {
         const p = place(d.node);
         const mine = d.id === v.myPiece;
         parts.push(`<g class="piece${mine ? ' is-mine' : ''}"><circle cx="${p.x}" cy="${p.y}" r="11" fill="${d.color}"/><text x="${p.x}" y="${p.y + 5}">${this.esc([...d.name][0])}</text></g>`);
@@ -216,7 +333,8 @@
         if (chosen.has(id)) parts.push(`<circle class="n-chosen-dot" cx="${n.x}" cy="${n.y}" r="8"/>`);
       }
 
-      svg.innerHTML = parts.join('');
+      svg.innerHTML = parts.join('') + '<g id="kt-fx"></g>';
+      if (this.anim) this.drawFx(performance.now() - this.anim.t0);
     }
 
     routeNodes() {
@@ -370,8 +488,8 @@
         })
         .join('');
       this.root.querySelector('#kt-log').innerHTML = `
-        <h3 class="kb-sub">怪盗の足取り</h3>
-        ${rows ? `<ol class="kt-log">${rows}</ol>` : '<p class="kt-note">まだ動いていません。移動手段は毎ターン、位置は3・6・9ターン目とお宝を盗んだときに公開されます。</p>'}`;
+        <div class="gk-last-head"><h3 class="kb-sub">怪盗の足取り</h3>${v.lastMove ? '<button class="btn btn-small" data-replay>動きをもう一度見る</button>' : ''}</div>
+        ${rows ? `<ol class="kt-log">${rows}</ol>` : `<p class="kt-note">まだ動いていません。移動手段は毎ターン、位置は${v.revealTurns.length ? `${v.revealTurns.join('・')}ターン目と` : ''}お宝を盗んだときに公開されます。</p>`}`;
     }
 
     renderTeam(v) {

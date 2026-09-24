@@ -735,3 +735,30 @@ th:not(:first-child) { text-align: right; }
 .gk-map .e-rail-ties { fill: none; stroke: #f4efe2; stroke-width: 3; stroke-dasharray: 2 9; }
 .gk-map .t-station { fill: #efe6d8; stroke: #5b4636; stroke-width: 3; }
 .lg-rail { border-top: 5px solid #5b4636; }
+
+/* 条約破りのモーダル */
+.gk-br-card { gap: 0.8rem; }
+.gk-br { display: grid; gap: 0.25rem; }
+.gk-br + .gk-br { border-top: 1px dashed var(--line); padding-top: 0.8rem; }
+.gk-br-stamp { font-family: var(--font-display); font-size: clamp(2.4rem, 10vw, 3.2rem); line-height: 1.1; color: var(--red); animation: deal-in 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.15); }
+.gk-br-stamp.is-mutual { color: var(--ink); }
+.gk-br small { color: var(--muted); }
+.gk-br-me { font-weight: 700; color: var(--red); background: #fff3f0; border-radius: var(--radius-ctl); padding: 0.3rem 0.6rem; }
+@media (prefers-reduced-motion: reduce) { .gk-br-stamp { animation: none; } }
+
+.gk-table th.is-key, .gk-table td.is-key { background: #fff5dc; color: var(--ink); font-weight: 700; box-shadow: inset 0 -2px 0 var(--brass); }
+.gk-table tr.is-out td { opacity: 0.5; }
+.gk-rules { font-size: 0.85rem; }
+.gk-rules summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+.gk-rules ul { display: grid; gap: 0.3rem; margin-top: 0.4rem; padding-left: 1.1rem; list-style: disc; }
+
+/* 怪盗と探偵の移動の再生 */
+.kt-map #kt-fx { pointer-events: none; }
+.kt-map .fx-piece circle { stroke: #fff; stroke-width: 3; }
+.kt-map .fx-piece text { font-size: 13px; font-weight: 700; fill: #fff; text-anchor: middle; }
+.kt-map .fx-thief circle { fill: var(--ink); stroke: var(--red); }
+.kt-map .fx-burst { fill: none; stroke: var(--red); stroke-width: 4; }
+.kt-map .fx-label { font-size: 20px; font-weight: 700; fill: var(--red); text-anchor: middle; paint-order: stroke; stroke: #f4efe2; stroke-width: 5px; }
+.kt-map .fx-arrow { fill: none; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85; }
+.kt-map .fx-banner rect { fill: rgba(21, 33, 29, 0.82); }
+.kt-map .fx-banner text { fill: #fff; font-size: 13px; font-weight: 700; text-anchor: middle; }

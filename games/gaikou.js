@@ -147,20 +147,28 @@ class GaikouGame {
       n.ready = false;
     });
 
-    // 領地:owner(国id or null)と兵
-    this.terr = this.map.nodes.map((n) => ({ owner: null, troops: 0 }));
-    const capitals = spread(this.map, count, 3, new Set(this.map.nodes.filter((n) => n.station).map((n) => n.id)));
+    // 領地:owner(国id or null)と兵。首都の位置から★の配置までを何通りか試し、国ごとの差が一番小さいものを使う
+    const stationSet = new Set(this.map.nodes.filter((n) => n.station).map((n) => n.id));
+    let best = null;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const capitals = spread(this.map, count, 3, stationSet);
+      const terr = this.map.nodes.map(() => ({ owner: null, troops: 0 }));
+      this.nations.forEach((n, i) => { terr[capitals[i]] = { owner: n.id, troops: 4 }; });
+      this.nations.forEach((n, i) => {
+        const free = shuffle(this.map.adj[capitals[i]].filter((x) => !terr[x].owner));
+        for (const x of free.slice(0, 2)) terr[x] = { owner: n.id, troops: 2 };
+      });
+      const taken = new Set(terr.map((t, i) => (t.owner ? i : -1)).filter((i) => i >= 0));
+      const placed = this.placeStars(taken, capitals);
+      if (!best || placed.sc < best.placed.sc) best = { capitals, terr, placed };
+      if (placed.sc === 0) break;
+    }
+    this.terr = best.terr;
     this.nations.forEach((n, i) => {
-      n.capital = capitals[i];
+      n.capital = best.capitals[i];
       this.map.nodes[n.capital].star = true;
-      this.terr[n.capital] = { owner: n.id, troops: 4 };
     });
-    this.nations.forEach((n) => {
-      const free = shuffle(this.map.adj[n.capital].filter((x) => !this.terr[x].owner));
-      for (const x of free.slice(0, 2)) this.terr[x] = { owner: n.id, troops: 2 };
-    });
-    const taken = new Set(this.terr.map((t, i) => (t.owner ? i : -1)).filter((i) => i >= 0));
-    for (const x of spread(this.map, count + 2, 2, taken)) {
+    for (const x of best.placed.stars) {
       this.map.nodes[x].star = true;
       this.terr[x] = { owner: null, troops: 2 };
     }
@@ -179,6 +187,62 @@ class GaikouGame {
 
     this.ctx.system(`${count}か国で開戦。★は全部で${this.starTotal}つ、${this.winStars}つ取れば即勝利。全${settings.rounds}ラウンドです`);
     this.startRound();
+  }
+
+  // --- 無所属の★の配置 ---
+  // 各国に「自分の首都のほうが近い★」を1つずつ同じくらいの距離で用意し、残り2つは複数の国から等距離の奪い合いの★にする。
+  // 何通りか試して、国ごとの差(近い★の数・一番近い★までの距離)が一番小さい配置を選ぶ
+  placeStars(taken, caps) {
+    const dist = this.map.dist;
+    const nodes = this.map.nodes.map((n) => n.id);
+    const nearest = (x) => {
+      const ds = caps.map((c) => dist[c][x]);
+      const min = Math.min(...ds);
+      const who = ds.filter((d) => d === min).length === 1 ? ds.indexOf(min) : -1;
+      return { min, who, ds };
+    };
+    const score = (stars) => {
+      const share = caps.map(() => 0);
+      for (const x of stars) {
+        const { who } = nearest(x);
+        if (who >= 0) share[who]++;
+      }
+      const near = caps.map((c) => Math.min(...stars.map((x) => dist[c][x])));
+      const within3 = caps.map((c) => stars.filter((x) => dist[c][x] <= 3).length);
+      const gap = (a) => Math.max(...a) - Math.min(...a);
+      return gap(within3) * 3 + gap(near) * 2 + gap(share);
+    };
+    let best = null;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const stars = [];
+      const free = (x) => !taken.has(x) && !stars.includes(x) && stars.every((y) => dist[x][y] >= 2);
+      // 1) 各国の「自分の★」:自分の首都から2〜3、ほかの首都よりはっきり近い場所
+      for (const i of shuffle(caps.map((_, i) => i))) {
+        let cands = nodes.filter((x) => free(x) && [2, 3].includes(dist[caps[i]][x]) && nearest(x).who === i);
+        if (!cands.length) cands = nodes.filter((x) => free(x) && dist[caps[i]][x] >= 2 && dist[caps[i]][x] <= 4 && nearest(x).who === i);
+        if (cands.length) stars.push(pick(cands));
+      }
+      // 2) 奪い合いの★:一番近い首都と2番目に近い首都の差が1以内の場所
+      const contested = (x) => {
+        const ds = [...nearest(x).ds].sort((a, b) => a - b);
+        return ds[0] >= 2 && ds[1] - ds[0] <= 1;
+      };
+      const tied = (x) => {
+        const ds = [...nearest(x).ds].sort((a, b) => a - b);
+        return ds[0] >= 2 && ds[1] === ds[0];
+      };
+      while (stars.length < caps.length + 2) {
+        let cands = nodes.filter((x) => free(x) && tied(x));
+        if (!cands.length) cands = nodes.filter((x) => free(x) && contested(x));
+        if (!cands.length) cands = nodes.filter(free);
+        if (!cands.length) break;
+        stars.push(pick(cands));
+      }
+      const sc = score(stars);
+      if (!best || sc < best.sc) best = { sc, stars };
+      if (sc === 0) break;
+    }
+    return best;
   }
 
   // --- 共通 ---
@@ -348,6 +412,7 @@ class GaikouGame {
     // --- 条約の判定 ---
     const surprise = new Set(); // "攻める側|攻められる側"
     const brokenNow = [];
+    const breaches = []; // 画面のモーダル用
     for (const t of [...this.treaties]) {
       const ab = this.hostileTo(t.a, t.b);
       const ba = this.hostileTo(t.b, t.a);
@@ -360,11 +425,13 @@ class GaikouGame {
         A.broken++;
         B.broken++;
         events.push(`${this.nm(A)}と${this.nm(B)}が互いに条約を破った。共倒れで両国とも次の増援が${BETRAY_PENALTY}減る`);
+        breaches.push({ kind: 'mutual', a: A.id, b: B.id });
       } else {
         const [atk, vic] = ab ? [A, B] : [B, A];
         atk.broken++;
         surprise.add(`${atk.id}|${vic.id}`);
         events.push(`${this.nm(atk)}が${this.nm(vic)}との条約を破って奇襲した!(攻撃に+${SURPRISE})`);
+        breaches.push({ kind: 'surprise', a: atk.id, b: vic.id });
       }
       brokenNow.push(t);
       this.cooldown[this.key(t.a, t.b)] = this.round + COOLDOWN;
@@ -470,7 +537,7 @@ class GaikouGame {
     }
     if (Object.keys(dividend).length) events.push(`平和配当:${Object.entries(dividend).map(([id, d]) => `${this.nm(this.nation(id))}+${d}`).join('、')}`);
     const moves = Object.entries(this.orders).flatMap(([nid, list]) => list.map((o) => ({ ...o, nation: nid })));
-    this.lastResult = { round: this.round, battles, events, moves, prevTerr };
+    this.lastResult = { round: this.round, battles, events, moves, prevTerr, breaches };
     this.history.push({ round: this.round, events });
     for (const e of events) this.ctx.system(e);
     for (const n of this.nations) if (this.owned(n.id).length === 0) this.ctx.system(`${this.label(n)}は領地をすべて失った。次のラウンドに反乱軍として再起する`);
@@ -486,21 +553,60 @@ class GaikouGame {
     return this.stars(n.id) + (this.objectiveDone(n) ? OBJECTIVE_POINTS : 0);
   }
 
+  // 勝者の決め方(画面にもこの順で表示する)
+  //  即勝利:★が勝利ラインに届いた国のうち ★の数 → 領地の数 → 兵の数
+  //  最終ラウンド後:全国のうち 点数(★+秘密の目標) → ★の数 → 領地の数 → 兵の数
+  //  最後まで並んだら同率で勝ち
+  criteria(kind) {
+    const lands = ['lands', '領地の数', (n) => this.owned(n.id).length];
+    const troops = ['troops', '兵の数', (n) => this.troops(n.id)];
+    const stars = ['stars', '★の数', (n) => this.stars(n.id)];
+    return kind === 'instant' ? [stars, lands, troops] : [['score', '点数(★+目標)', (n) => this.score(n)], stars, lands, troops];
+  }
+
   end(kind, reached = []) {
     this.phase = 'ended';
     this.seq++;
-    const pool = kind === 'instant' ? reached : this.nations;
-    const val = (n) => (kind === 'instant' ? this.stars(n.id) : this.score(n));
-    const sorted = [...pool].sort((a, b) => val(b) - val(a) || this.owned(b.id).length - this.owned(a.id).length || this.troops(b.id) - this.troops(a.id));
-    const best = sorted[0];
-    this.winners = pool.filter((n) => val(n) === val(best) && this.owned(n.id).length === this.owned(best.id).length && this.troops(n.id) === this.troops(best.id)).map((n) => n.id);
+    let pool = kind === 'instant' ? [...reached] : [...this.nations];
+    const steps = [];
+    let decidedBy = pool.length === 1 ? 'only' : null;
+    for (const [key, label, f] of this.criteria(kind)) {
+      if (pool.length === 1) break;
+      const best = Math.max(...pool.map(f));
+      const next = pool.filter((n) => f(n) === best);
+      steps.push({ key, label, best, tied: next.length });
+      if (next.length === 1) decidedBy = key;
+      pool = next;
+    }
+    if (pool.length > 1) decidedBy = 'shared';
+    this.winners = pool.map((n) => n.id);
     this.endKind = kind;
+    this.decision = {
+      decidedBy,
+      reached: kind === 'instant' ? reached.map((n) => n.id) : [],
+      steps,
+      order: this.criteria(kind).map(([key, label]) => ({ key, label })),
+    };
+    const names = this.winners.map((id) => this.label(this.nation(id))).join('、');
+    const how = this.decisionText();
     this.ctx.system(
       kind === 'instant'
-        ? `${this.winners.map((id) => this.label(this.nation(id))).join('、')}が★${this.stars(best.id)}つを押さえて即勝利!`
-        : `全ラウンド終了。${this.winners.map((id) => this.label(this.nation(id))).join('、')}の勝ち(${this.score(best)}点)`,
+        ? `${names}が★${this.stars(this.winners[0])}つを押さえて即勝利!${how}`
+        : `全ラウンド終了。${names}の勝ち(${this.score(this.nation(this.winners[0]))}点)${how}`,
     );
     this.ctx.update();
+  }
+
+  // 「何で決まったか」を一文で
+  decisionText() {
+    const d = this.decision;
+    if (!d || d.decidedBy === 'only') return '';
+    const labels = Object.fromEntries(d.order.map((o) => [o.key, o.label]));
+    const first = d.order[0];
+    if (d.decidedBy === 'shared') return `(${d.order.map((o) => o.label).join('・')}がすべて同じため、同率で勝ち)`;
+    if (d.decidedBy === first.key) return this.endKind === 'instant' ? `(同じラウンドに${d.reached.length}か国が届いたが、${first.label}で上回った)` : '';
+    const tiedBefore = d.order.slice(0, d.order.findIndex((o) => o.key === d.decidedBy)).map((o) => o.label).join('・');
+    return `(${tiedBefore}が同じため、${labels[d.decidedBy]}で決着)`;
   }
 
   // ---------- 条約 ----------
@@ -706,7 +812,11 @@ class GaikouGame {
       lastResult: this.lastResult
         ? this.lastResult
         : null,
-      result: ended ? { kind: this.endKind, winners: this.winners } : null,
+      result: ended ? { kind: this.endKind, winners: this.winners, ...this.decision, text: this.decisionText() } : null,
+      rules: {
+        instant: this.criteria('instant').map(([, label]) => label),
+        final: this.criteria('rounds').map(([, label]) => label),
+      },
       objectivesOn: !!this.s.objectives,
     };
   }

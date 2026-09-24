@@ -5,7 +5,8 @@
 const { generateMap, spreadPick, TREASURE_NAMES } = require('./kaito-map');
 
 const TRANSPORT = { walk: '徒歩', bus: 'バス', subway: '地下鉄' };
-const REVEAL_TURNS = [3, 6, 9];
+// 怪盗の位置を定期的に公開するターン(ロビーで選ぶ)。お宝を盗んだときは設定にかかわらず公開
+const REVEAL_SCHEDULES = { r369: [3, 6, 9], r48: [4, 8], none: [] };
 const NEED_STEAL = 3;
 const TICKETS = { bus: 4, subway: 2 };
 const CPU_DETECTIVE_NAMES = ['犬塚', '鷹野', '猫田', '狐坂', '熊谷'];
@@ -43,6 +44,7 @@ class KaitoGame {
     this.timers = new Set();
     this.map = generateMap();
     this.maxTurns = settings.turns;
+    this.revealTurns = REVEAL_SCHEDULES[settings.reveal] || REVEAL_SCHEDULES.r48;
 
     const humans = shuffle(humanIds);
     const thiefOwner = settings.thiefMode === 'cpu' ? null : humans.shift() ?? null;
@@ -134,11 +136,11 @@ class KaitoGame {
     this.seq++;
     this.fakeThisTurn = 0;
 
-    const note = REVEAL_TURNS.includes(this.turn) ? '(このターンの終わりに怪盗の位置が公開されます)' : '';
+    const note = this.revealTurns.includes(this.turn) ? '(このターンの終わりに怪盗の位置が公開されます)' : '';
     this.ctx.system(`${this.turn}ターン目 / ${this.maxTurns}${note}`);
 
     // 本物の目撃通報(タイミングはランダム。偽の通報と見分けがつかないように)
-    if (this.turn > 1 && !REVEAL_TURNS.includes(this.turn - 1) && Math.random() < 0.55) {
+    if (this.turn > 1 && !this.revealTurns.includes(this.turn - 1) && Math.random() < 0.55) {
       this.later(rint(4000, Math.max(5000, ms - 8000)), () => {
         if (this.phase !== 'move') return;
         const near = [this.thief.node, ...this.map.adj[this.thief.node].filter((m) => m.type === 'walk').map((m) => m.to)];
@@ -238,11 +240,20 @@ class KaitoGame {
       }
     }
     const stolenCount = this.treasures.filter((t) => t.stolen).length;
-    const revealed = capturedBy || stolen || REVEAL_TURNS.includes(this.turn) ? final : null;
+    const revealed = capturedBy || stolen || this.revealTurns.includes(this.turn) ? final : null;
     if (revealed !== null) this.lastKnown = { node: final, turn: this.turn };
 
     const transports = tm.disguise ? legs.map(() => 'hidden') : legs.map((l) => l.type);
     this.log.push({ turn: this.turn, transports, revealed, stolen, double: legs.length === 2 });
+    // 画面の移動アニメーション用(怪盗のルートは怪盗本人と、ゲーム終了後だけに見せる)
+    this.lastMove = {
+      turn: this.turn,
+      detectives: dm.map((m) => ({ id: m.d.id, from: m.from, to: m.to, type: m.type })),
+      thiefLegs: legs.map((l) => ({ from: l.from, to: l.to, type: tm.disguise ? l.type : l.type })),
+      revealed,
+      stolen,
+      captured: capturedBy ? capturedBy.id : null,
+    };
     this.updatePossible(transports, revealed);
 
     const tText = transports.map((t) => (t === 'hidden' ? '変装(不明)' : TRANSPORT[t])).join('→');
@@ -448,7 +459,7 @@ class KaitoGame {
       seq: this.seq,
       turn: this.turn,
       maxTurns: this.maxTurns,
-      revealTurns: REVEAL_TURNS,
+      revealTurns: this.revealTurns,
       needSteal: NEED_STEAL,
       endsAt: this.phase === 'move' ? this.endsAt : null,
       map: { width: this.map.width, height: this.map.height, nodes: this.map.nodes, edges: this.map.edges },
@@ -473,6 +484,9 @@ class KaitoGame {
         fakeTips: role === 'thief' ? this.thief.fakeTips : null,
       },
       lastKnown: this.lastKnown,
+      lastMove: this.lastMove
+        ? { ...this.lastMove, thiefLegs: role === 'thief' || ended ? this.lastMove.thiefLegs : null }
+        : null,
       log: this.log,
       role,
       myPiece: piece,
@@ -508,6 +522,16 @@ module.exports = {
     },
     { key: 'detectives', label: '探偵のコマ', default: 4, options: [3, 4, 5].map((n) => ({ value: n, label: `最低${n}つ(足りない分はCPU)` })) },
     { key: 'turns', label: 'ターン数', default: 12, options: [10, 12, 14].map((n) => ({ value: n, label: `${n}ターン` })) },
+    {
+      key: 'reveal',
+      label: '怪盗の位置の公開',
+      default: 'r48',
+      options: [
+        { value: 'r48', label: '4・8ターン目(と盗んだとき)' },
+        { value: 'r369', label: '3・6・9ターン目(と盗んだとき)' },
+        { value: 'none', label: '盗んだときだけ' },
+      ],
+    },
     { key: 'turnSeconds', label: '1ターンの時間', default: 90, options: [30, 45, 60, 90, 120, 150, 180].map((n) => ({ value: n, label: `${n}秒` })) },
     {
       key: 'leakRate',
