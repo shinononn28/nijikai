@@ -4,6 +4,8 @@
 const kaburi = require('./kaburi');
 const moon = require('./moon');
 const kaito = require('./kaito');
+const nimaijita = require('./nimaijita');
+const gaikou = require('./gaikou');
 
 const catalog = [
   kaburi,
@@ -17,6 +19,8 @@ const catalog = [
   },
   moon,
   kaito,
+  nimaijita,
+  gaikou,
 ];
 
 const getGame = (id) => catalog.find((g) => g.id === id) || null;

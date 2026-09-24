@@ -171,6 +171,11 @@ function makeGameContext(room) {
     post: (msg, readers = null) => {
       if (rooms.get(room.code) === room) pushChat(room, msg, readers);
     },
+    // ゲーム画面への個別イベント(アニメーションやログなど、状態とは別に届けたいもの)
+    emitTo: (playerId, type, data) => {
+      const sid = room.players.get(playerId)?.socketId;
+      if (sid) io.to(sid).emit('game:event', { gameId: room.gameId, type, data });
+    },
     say: (playerId, name, text) => {
       if (rooms.get(room.code) === room) pushChat(room, { type: 'user', playerId, name, text, cpu: true });
     },
@@ -242,8 +247,10 @@ function joinRoom(socket, room, name, clientId, ack) {
 
   ack({ ok: true, code: room.code, playerId: id });
   socket.emit('chat:history', visibleChat(room, id));
+  room.game?.onConnectionChange?.();
   sendRoomState(room);
   sendGameViews(room);
+  for (const ev of room.game?.backlog?.(id) || []) socket.emit('game:event', { gameId: room.gameId, ...ev });
 }
 
 io.on('connection', (socket) => {
@@ -285,6 +292,7 @@ io.on('connection', (socket) => {
     if (ch === 'all') {
       lastChat = now;
       pushChat(room, { type: 'user', playerId: player.id, name: player.name, text: t });
+      room.game?.onPublicChat?.(player.id, t);
       return ack({ ok: true });
     }
     // ゲームが用意したチーム用チャンネル

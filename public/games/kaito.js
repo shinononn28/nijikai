@@ -188,23 +188,32 @@
         parts.push(`<g class="last-known"><circle cx="${n.x}" cy="${n.y}" r="21"/><text x="${n.x}" y="${n.y - 27}">${v.lastKnown.turn}T目撃</text></g>`);
       }
 
-      // コマ(同じマスに複数いるときはずらす)
+      // コマは交差点の中心を避けて周りに置く(移動先のハイライトを隠さないため)。
+      // 右上はお宝の印、真下は地名なので使わない
+      const SLOTS = [[-19, -15], [-27, 5], [25, 5], [-2, -28], [-42, -10], [42, -4]];
       const stack = {};
       const place = (node) => {
         const i = (stack[node] = (stack[node] ?? -1) + 1);
         const n = P(node);
-        if (i === 0) return { x: n.x, y: n.y };
-        const ang = (i * 2 * Math.PI) / 5 - Math.PI / 2;
-        return { x: n.x + Math.cos(ang) * 20, y: n.y + Math.sin(ang) * 20 };
+        const [dx, dy] = SLOTS[i % SLOTS.length];
+        return { x: n.x + dx, y: n.y + dy };
       };
       if (v.thief.node !== null && v.thief.node !== undefined) {
         const p = place(v.thief.node);
-        parts.push(`<g class="piece piece-thief"><circle cx="${p.x}" cy="${p.y}" r="13"/><text x="${p.x}" y="${p.y + 5}">怪</text></g>`);
+        parts.push(`<g class="piece piece-thief"><circle cx="${p.x}" cy="${p.y}" r="12"/><text x="${p.x}" y="${p.y + 5}">怪</text></g>`);
       }
       for (const d of v.detectives) {
         const p = place(d.node);
         const mine = d.id === v.myPiece;
-        parts.push(`<g class="piece${mine ? ' is-mine' : ''}"><circle cx="${p.x}" cy="${p.y}" r="12" fill="${d.color}"/><text x="${p.x}" y="${p.y + 5}">${this.esc([...d.name][0])}</text></g>`);
+        parts.push(`<g class="piece${mine ? ' is-mine' : ''}"><circle cx="${p.x}" cy="${p.y}" r="11" fill="${d.color}"/><text x="${p.x}" y="${p.y + 5}">${this.esc([...d.name][0])}</text></g>`);
+      }
+
+      // 移動先のハイライトはコマより上に重ねて、どこへ行けるかを必ず見えるようにする
+      for (const id of targets) {
+        const n = P(id);
+        const occupied = v.detectives.some((d) => d.node === id) || v.thief.node === id;
+        parts.push(`<circle class="n-target-top${chosen.has(id) ? ' is-chosen' : ''}${occupied ? ' is-occupied' : ''}" cx="${n.x}" cy="${n.y}" r="25"/>`);
+        if (chosen.has(id)) parts.push(`<circle class="n-chosen-dot" cx="${n.x}" cy="${n.y}" r="8"/>`);
       }
 
       svg.innerHTML = parts.join('');

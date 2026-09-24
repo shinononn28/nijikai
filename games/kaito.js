@@ -394,7 +394,7 @@ class KaitoGame {
   // ---------- チャット ----------
   chatChannels(pid) {
     const base = [{ id: 'all', label: '全体' }];
-    if (this.phase !== 'ended' && this.detectiveOwners().includes(pid)) base.push({ id: 'detective', label: '作戦' });
+    if (this.phase !== 'ended' && this.detectiveOwners().includes(pid)) base.push({ id: 'detective', label: '作戦', default: true });
     return base;
   }
 
@@ -508,7 +508,7 @@ module.exports = {
     },
     { key: 'detectives', label: '探偵のコマ', default: 4, options: [3, 4, 5].map((n) => ({ value: n, label: `最低${n}つ(足りない分はCPU)` })) },
     { key: 'turns', label: 'ターン数', default: 12, options: [10, 12, 14].map((n) => ({ value: n, label: `${n}ターン` })) },
-    { key: 'turnSeconds', label: '1ターンの時間', default: 45, options: [30, 45, 60, 90].map((n) => ({ value: n, label: `${n}秒` })) },
+    { key: 'turnSeconds', label: '1ターンの時間', default: 90, options: [30, 45, 60, 90, 120, 150, 180].map((n) => ({ value: n, label: `${n}秒` })) },
     {
       key: 'leakRate',
       label: '盗聴される確率',

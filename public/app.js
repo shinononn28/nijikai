@@ -44,6 +44,7 @@
     sendChannel: 'all',
   };
   let game = null; // { id, instance }
+  let pendingEvents = []; // ゲーム画面ができる前に届いたイベント
 
   const socket = io();
   const app = $('#app');
@@ -228,7 +229,7 @@
     if (!state.channels.some((c) => c.id === state.sendChannel)) state.sendChannel = 'all';
     el.hidden = state.channels.length < 2;
     el.innerHTML = `<span>送信先</span>${state.channels
-      .map((c) => `<button type="button" class="ch-btn ch-${esc(c.id)}${c.id === state.sendChannel ? ' is-on' : ''}" data-ch="${esc(c.id)}">${esc(c.label)}</button>`)
+      .map((c) => `<button type="button" class="ch-btn ch-${esc(c.id.split(':')[0])}${c.id === state.sendChannel ? ' is-on' : ''}" data-ch="${esc(c.id)}">${esc(c.label)}</button>`)
       .join('')}`;
     el.onclick = (ev) => {
       const b = ev.target.closest('[data-ch]');
@@ -291,7 +292,7 @@
 
   function chatItem(m) {
     if (m.type === 'system') return `<li class="msg msg-system"><span>${esc(m.text)}</span></li>`;
-    const ch = m.channel && m.channel !== 'all' ? ` msg-ch msg-ch-${esc(m.channel)}` : '';
+    const ch = m.channel && m.channel !== 'all' ? ` msg-ch msg-ch-${esc(m.channel.split(':')[0])}` : '';
     const chTag = ch ? `<span class="tag tag-ch">${esc(m.channelLabel)}</span>` : '';
     if (m.type === 'tip') {
       return `<li class="msg msg-tip${ch}"><div class="msg-meta">${chTag}<time>${time(m.ts)}</time></div><div class="msg-text">${esc(m.text)}</div></li>`;
@@ -360,6 +361,10 @@
         destroyGame();
         main.innerHTML = '';
         game = { id: v.gameId, instance: client.create(main, gameApi) };
+        // 画面ができる前に届いたイベントを流し込む
+        const queued = pendingEvents.filter((ev) => ev.gameId === v.gameId);
+        pendingEvents = [];
+        for (const ev of queued) game.instance.onEvent?.(ev.type, ev.data);
       }
       game.instance.update(v);
       return;
@@ -493,6 +498,14 @@
     if (state.screen === 'room') renderMain();
   });
 
+  socket.on('game:event', (ev) => {
+    if (game && game.id === ev.gameId) game.instance.onEvent?.(ev.type, ev.data);
+    else {
+      pendingEvents.push(ev);
+      if (pendingEvents.length > 50) pendingEvents.shift();
+    }
+  });
+
   socket.on('chat:history', (list) => {
     state.chat = list;
     renderChatLog();
@@ -504,8 +517,9 @@
     const before = state.channels.map((c) => c.id).join();
     state.channels = Array.isArray(list) && list.length ? list : [{ id: 'all', label: '全体' }];
     if (before !== state.channels.map((c) => c.id).join()) {
-      // チーム用チャンネルができたら、そちらを送信先にしておく
-      state.sendChannel = state.channels.length > 1 ? state.channels[1].id : 'all';
+      // ゲームが「既定」に指定したチャンネル(怪盗と探偵の作戦など)があれば、そちらを送信先にしておく
+      const preferred = state.channels.find((c) => c.default);
+      if (preferred) state.sendChannel = preferred.id;
     }
     renderChannels();
   });

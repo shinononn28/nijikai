@@ -14,6 +14,14 @@ TRPGの二次会で遊べる、チャット付きのブラウザパーティゲ�
   - 怪盗の移動手段は毎ターン、位置は3・6・9ターン目とお宝を盗んだときに公開。怪盗には変装(移動手段を隠す)×2と高飛び(2回移動)×1、探偵はバス4回・地下鉄2回まで。
   - 探偵だけの「作戦」チャットがあり、発言は設定した確率で伏せ字まじりに怪盗へ漏れる(盗聴)。作戦チャットには本物の目撃通報が届き、怪盗は同じ見た目の偽の通報を3回まで送れる。
   - 怪盗をCPUにすれば、全員で協力して追いかける遊び方もできる。
+- **二枚舌**(1〜6人、卓は4〜6人でCPUが埋める):赤と青の陣営に分かれ、誰が味方かわからないままダイスの嘘を読み合う陣営戦ライアーズダイス。元の「二枚舌の酒場」のエンジンと画面をそのまま移植しています。
+  - 卓での発言は二次会卓のチャット欄で行います。全体チャットの発言はそのまま卓の発言になり、CPUが反応したり推理の材料にしたりします。CPUの発言もチャット欄に流れます。
+  - ゲーム内の「記録」ボタンで、ログ・手帳(自分だけの情報)・カードの使用状況を見られます。
+- **小国の外交**(1〜6人、国は3〜6か国でCPUが埋める):自動生成の大陸で、全員が同時に命令を出して陣取り。
+  - 命令は「隣の領地へ兵を動かす(攻撃・移動)」と「他の国の攻撃や守備への援軍」。戦闘は兵の合計+サイコロ(0〜2)で、同点は守備側の勝ち。援軍は戦闘後に元の領地へ戻る。
+  - 不可侵条約はお互い守れば両国に平和配当(兵+1、2条約まで)、片方だけ攻めれば奇襲(+2)、両方攻めれば共倒れ(次の増援−2)。破った条約は公開され、同じ相手とは2ラウンド結び直せない。
+  - ★の4割で即勝利。全ラウンド終了時は★と秘密の目標(+2点)で決着。領地をすべて失った国は、トップの国の手薄な領地で反乱軍として再起。
+  - 人間どうしは1対1の「密談」チャットを使える。
 - 忘れた単語は「準備中」としてゲーム選択画面に並んでいます。
 
 ## ローカルで動かす
@@ -50,10 +58,15 @@ games/kaburi-topics.js お題の素材(カテゴリ・頭文字)。行を足す�
 games/moon.js          月面基地の酸素のルールとCPU(数値の調整は冒頭の EVENTS / DECK と MoonGame)
 games/kaito.js         怪盗と探偵のルールとCPU(公開ターンやチケット数は冒頭の定数)
 games/kaito-map.js     怪盗と探偵の街の自動生成
+games/nimaijita.js     二枚舌を部屋・チャットにつなぐアダプター
+games/gaikou.js        小国の外交のルールとCPU(条約の数値は冒頭の定数)
 public/app.js          画面の土台(ホーム・ロビー・チャット)
 public/games/kaburi.js 被り列挙クイズの画面
 public/games/moon.js   月面基地の酸素の画面
 public/games/kaito.js  怪盗と探偵の画面(地図はSVG)
+public/games/nimaijita-engine.js 二枚舌のルールとCPU(元のエンジン。stop() と発言テキストの追加のみ変更)
+public/games/nimaijita.js        二枚舌の画面(元の画面を Shadow DOM の中に移植)
+public/games/gaikou.js           小国の外交の画面
 public/style.css       見た目
 ```
 
@@ -65,6 +78,8 @@ public/style.css       見た目
    - `onJoin(id)` / `onLeave(id)` / `onConnectionChange()` / `dispose()`
    - 状態が変わったら `ctx.update()`、チャットへのお知らせは `ctx.system(text)`、終わったら `ctx.finish()`
    - 特定の人にだけ届けるメッセージは `ctx.post(msg, readers)`、CPUの発言は `ctx.say(id, name, text)`
+   - 状態とは別に届けたい演出やログは `ctx.emitTo(playerId, type, data)`(画面側の `onEvent(type, data)` に届く)。再接続時に送り直すものは `backlog(playerId)` で返す
+   - 全体チャットの発言をゲームで使うなら `onPublicChat(playerId, text)`
    - チーム用チャンネルを作るなら `chatChannels(playerId)` / `chatChannel(playerId, channel)` / `onChat(playerId, channel, text)` を実装する(怪盗と探偵が例)
 2. `games/index.js` の `catalog` に登録します(`settings` を書くとロビーに設定欄が自動で出ます)。
 3. `public/games/` に画面を作り、`window.GameClients[ゲームID] = { create(root, api) }` で登録して、`index.html` に `<script>` を足します。

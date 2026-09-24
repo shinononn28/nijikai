@@ -583,6 +583,10 @@ th:not(:first-child) { text-align: right; }
 .kt-map .node.is-chosen .n-dot { fill: var(--brass); }
 .kt-map .node:focus { outline: none; }
 .kt-map .node:focus-visible .n-target { stroke: var(--ink); stroke-width: 4; }
+.kt-map .n-target-top { fill: none; stroke: var(--brass); stroke-width: 4; pointer-events: none; }
+.kt-map .n-target-top.is-occupied { stroke-dasharray: 7 5; }
+.kt-map .n-target-top.is-chosen { stroke: var(--ink); stroke-width: 5; }
+.kt-map .n-chosen-dot { fill: var(--brass); stroke: var(--ink); stroke-width: 3; pointer-events: none; }
 .kt-map .route { fill: none; stroke: var(--ink); stroke-width: 4; stroke-dasharray: 3 7; stroke-linecap: round; }
 .kt-map .trail { fill: none; stroke: var(--red); stroke-width: 5; stroke-dasharray: 10 8; stroke-linecap: round; stroke-linejoin: round; }
 .kt-map .treasure { fill: var(--red); stroke: #fff; stroke-width: 2.5; }
@@ -637,3 +641,59 @@ th:not(:first-child) { text-align: right; }
   .kt-map .piece text { font-size: 15px; }
   .kt-map .last-known text { font-size: 17px; }
 }
+
+/* ---------- 二枚舌(画面は Shadow DOM の中) ---------- */
+.main.is-nmj { overflow: hidden; padding: 0.75rem; }
+.nmj-host { display: block; height: 100%; max-width: 600px; margin: 0 auto; }
+@media (max-width: 760px) {
+  .main.is-nmj { padding: 0.4rem; }
+}
+.chat-channels { flex-wrap: wrap; }
+.ch-btn.ch-dm.is-on { background: #7a4fb0; border-color: #7a4fb0; }
+.msg-ch-dm .tag-ch { background: #7a4fb0; border-color: #7a4fb0; }
+.msg-ch-dm .msg-text { background: #f3eefa; border-color: #dccff0; }
+
+/* ---------- 小国の外交 ---------- */
+.gk-map .terr .t-body { stroke: #fff; stroke-width: 3; }
+.gk-map .terr.is-mine .t-body { stroke: var(--ink); stroke-width: 4; }
+.gk-map .terr[tabindex] { cursor: pointer; }
+.gk-map .t-ring { fill: none; stroke: var(--brass); stroke-width: 3; stroke-dasharray: 6 5; pointer-events: none; }
+.gk-map .terr.is-to .t-ring { stroke: var(--ink); stroke-width: 4; stroke-dasharray: none; }
+.gk-map .t-from { fill: none; stroke: var(--brass); stroke-width: 5; pointer-events: none; }
+.gk-map .t-n { font-size: 20px; font-weight: 700; fill: #fff; text-anchor: middle; paint-order: stroke; stroke: rgba(0, 0, 0, 0.35); stroke-width: 3px; pointer-events: none; }
+.gk-map .t-star { font-size: 20px; fill: #e8b949; text-anchor: middle; paint-order: stroke; stroke: #5a4310; stroke-width: 2px; pointer-events: none; }
+.gk-map .t-cap { font-size: 17px; fill: var(--ink); text-anchor: middle; paint-order: stroke; stroke: #f4efe2; stroke-width: 4px; pointer-events: none; }
+.gk-map .t-boom { font-size: 16px; pointer-events: none; }
+.gk-map .ord-atk, .gk-map .ord-move, .gk-map .ord-sup { stroke-width: 5; stroke-linecap: round; pointer-events: none; }
+.gk-map .ord-sup { stroke-dasharray: 7 6; }
+.gk-map .ord-n { font-size: 15px; font-weight: 700; text-anchor: middle; fill: var(--ink); paint-order: stroke; stroke: #f4efe2; stroke-width: 4px; pointer-events: none; }
+.gk-opts { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.gk-count { display: flex; align-items: center; gap: 0.5rem; }
+.gk-n { font-family: var(--font-display); font-size: 1.5rem; min-width: 1.5em; text-align: center; }
+.gk-list { display: grid; gap: 0.3rem; }
+.gk-list li { display: flex; align-items: center; gap: 0.5rem; border-bottom: 1px dashed var(--line); padding: 0.2rem 0; font-size: 0.9rem; }
+.gk-list .x { margin-left: auto; border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 1rem; }
+.gk-k { font-weight: 700; font-size: 0.8rem; border-radius: 4px; padding: 0 0.4rem; border: 2px solid; }
+.gk-k-atk { border-color: var(--red); color: var(--red); }
+.gk-k-move { border-color: var(--line); }
+.gk-k-sup { border-color: #7a4fb0; color: #7a4fb0; border-style: dashed; }
+.gk-payoff { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.gk-payoff th, .gk-payoff td { border: 1px solid var(--line); padding: 0.25rem 0.35rem; text-align: center; }
+.gk-payoff th { background: var(--paper); font-weight: 700; }
+.gk-treaties { display: grid; gap: 0.4rem; }
+.gk-treaties li { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.gk-btns { margin-left: auto; display: flex; gap: 0.3rem; }
+.gk-leader { display: inline; margin-left: 0.4rem; font-weight: 500; color: var(--muted); font-size: 0.75rem; }
+.gk-obj { background: #fff5dc; border-radius: var(--radius-ctl); padding: 0.5rem 0.7rem; font-size: 0.88rem; display: grid; gap: 0.15rem; }
+.gk-obj small { color: var(--muted); }
+.gk-battles, .gk-events { display: grid; gap: 0.35rem; font-size: 0.85rem; }
+.gk-side { border-left: 4px solid var(--c); padding-left: 0.3rem; white-space: nowrap; }
+.gk-events li::before { content: '・'; }
+.gk-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.gk-table th, .gk-table td { padding: 0.35rem 0.3rem; border-bottom: 1px dashed var(--line); text-align: left; vertical-align: top; }
+.gk-table th { color: var(--muted); font-size: 0.78rem; }
+.gk-table small { display: block; color: var(--muted); font-size: 0.72rem; }
+.gk-table tr.is-win td { background: #fff5dc; font-weight: 700; }
+.gk-table .ok { color: var(--good); font-weight: 700; }
+.gk-table .ng { color: var(--muted); }
+.kb-phase .dot { margin-right: 0.35rem; vertical-align: -0.1em; }
