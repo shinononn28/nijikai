@@ -82,27 +82,27 @@ function generateMap(nationCount) {
   for (const [a, b] of edges) { roadAdj[a].push(b); roadAdj[b].push(a); }
   const roadDist = bfs(roadAdj);
 
-  // 鉄道:道では遠い領地どうしを直結する。端から固めた内側の領地も狙われうるようにするため
-  const railCount = nationCount >= 5 ? 3 : 2;
-  const minD = Math.max(3, Math.floor((cols + rows) / 2) - 1);
-  const rails = [];
-  const stations = new Set();
-  const nearStation = (x) => [...stations].some((st) => roadDist[st][x] <= 1);
-  const pairs = [];
-  const gridDist = (a, b) => Math.abs(nodes[a].c - nodes[b].c) + Math.abs(nodes[a].r - nodes[b].r);
-  for (let a = 0; a < nodes.length; a++) {
-    for (let b = a + 1; b < nodes.length; b++) {
-      // 道で遠いだけでなく、地図の上でも離れている2か所を結ぶ(見た目にも「遠くへの近道」になるように)
-      if (roadDist[a][b] >= minD && gridDist(a, b) >= minD) pairs.push([a, b]);
-    }
+  // 鉄道:地図の四隅(と、国が多いときは左右の中ほど)に駅を置いて、対角線どうしを結ぶ。
+  // どの方向の「後方」にも駅があるので、前線の後ろを兵0で空けておくと鉄道から突かれる
+  const outer = (n) => n.c === 0 || n.c === cols - 1 || n.r === 0 || n.r === rows - 1;
+  const zone = (cs, rs) => {
+    const list = nodes.filter((n) => cs.includes(n.c) && rs.includes(n.r));
+    const edge = list.filter(outer);
+    return pick(edge.length ? edge : list).id;
+  };
+  const left = [0, 1];
+  const right = [cols - 2, cols - 1];
+  const top = [0, 1];
+  const bottom = [rows - 2, rows - 1];
+  const rails = [
+    [zone(left, top), zone(right, bottom)],
+    [zone(right, top), zone(left, bottom)],
+  ];
+  if (nationCount >= 5) {
+    const mid = [Math.floor((rows - 1) / 2), Math.ceil((rows - 1) / 2)];
+    rails.push([zone([0], mid), zone([cols - 1], mid)]);
   }
-  for (const [a, b] of shuffle(pairs)) {
-    if (rails.length >= railCount) break;
-    if (nearStation(a) || nearStation(b)) continue;
-    rails.push([a, b]);
-    stations.add(a);
-    stations.add(b);
-  }
+  const stations = new Set(rails.flat());
   const adj = roadAdj.map((list) => [...list]);
   for (const [a, b] of rails) { adj[a].push(b); adj[b].push(a); }
   for (const st of stations) nodes[st].station = true;
