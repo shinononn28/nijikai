@@ -41,7 +41,7 @@
 
     move(d) {
       const door = this.v.room?.doors[d];
-      if (!door?.open || this.api.remaining(this.v.me.cooldownUntil) > 0) return;
+      if (!door?.open || this.api.remaining(this.v.me.cooldownUntil) > 0 || this.v.me.torch < this.v.me.cost) return;
       this.lastDir = d;
       this.api.send('move', { dir: d });
     }
@@ -63,7 +63,7 @@
                 <thead><tr><th>階</th><th>結果</th><th class="num">残りの松明</th></tr></thead>
                 <tbody>${v.results.map((r) => `<tr><td>${r.floor}階</td><td>${r.ok ? '合流成功' : r.why === 'time' ? '時間切れ' : '松明切れ'}</td><td class="num">${r.torch} / ${r.torchMax}</td></tr>`).join('')}</tbody>
               </table>
-              <p class="kt-note">ランクは3つの階の残り松明の割合で決まります(S 55%以上・A 38%以上・B 20%以上)。</p>
+              <p class="kt-note">ランクは、全員の残り松明の合計の割合で決まります(S 55%以上・A 38%以上・B 20%以上)。</p>
               ${this.api.isHost() ? '<button class="btn btn-primary" data-act="finish">ロビーに戻る</button>' : '<p class="hint wait">ホストがロビーに戻すのを待っています</p>'}
             </div>
           </div>`;
@@ -94,6 +94,8 @@
         if (b) this.move(Number(b.dataset.door));
       });
       this.root.querySelector('#mk-tools').addEventListener('click', (ev) => {
+        const g = ev.target.closest('[data-give]');
+        if (g && !g.disabled) return this.api.send('give', { to: g.dataset.give });
         const b = ev.target.closest('[data-act]');
         if (!b || b.disabled) return;
         this.api.send(b.dataset.act);
@@ -115,12 +117,16 @@
     }
 
     renderStatus(v) {
-      const pct = Math.max(0, (v.torch / v.torchMax) * 100);
+      const me = v.me;
+      const mine = me ? me.torch : v.torch;
+      const max = me ? me.torchMax : v.torchMax;
+      const pct = Math.max(0, Math.min(100, (mine / Math.max(1, max)) * 100));
       this.root.querySelector('#mk-status').innerHTML = `
         <div class="mk-torch">
-          <span class="mk-torch-label">🔥 松明(チーム共有)</span>
-          <span class="mk-torch-n${v.torch <= v.torchMax * 0.25 ? ' is-low' : ''}">${v.torch}<small> / ${v.torchMax}</small></span>
+          <span class="mk-torch-label">🔥 ${me ? 'あなたの松明' : 'パーティの松明'}${me && me.cost > 1 ? '(肩を貸しているので1部屋2本)' : ''}</span>
+          <span class="mk-torch-n${mine <= max * 0.25 ? ' is-low' : ''}">${mine}<small> / ${max}</small></span>
           <div class="mk-torch-bar"><span style="width:${pct}%"></span></div>
+          ${me ? `<span class="mk-torch-team">パーティ全体 ${v.torch} / ${v.torchMax}</span>` : ''}
         </div>`;
     }
 
@@ -137,7 +143,7 @@
         this.lastHit = v.me.lastHit;
         if (fresh) this.flashHit();
       }
-      const cd = this.api.remaining(v.me.cooldownUntil) > 0;
+      const cd = this.api.remaining(v.me.cooldownUntil) > 0 || v.me.torch < v.me.cost;
       const pos = ['top', 'right', 'bottom', 'left'];
       const doors = r.doors
         .map((d) => {
@@ -163,7 +169,9 @@
             ${others ? `<div class="mk-others">${others}<small>${r.others.map((o) => e(o.name)).join('・')}がいる</small></div>` : ''}
           </div>
         </div>
-        <p class="kt-note mk-help">扉をタップして進みます(PCは矢印キーやWASDでも)。扉の横の文字は、その向こうの部屋から伝わる気配です。</p>`;
+        ${v.me.torch < v.me.cost
+          ? '<p class="mk-stuck">松明が尽きて動けません。仲間にこの部屋まで来てもらい、松明を分けてもらいましょう。</p>'
+          : '<p class="kt-note mk-help">扉をタップして進みます(PCは矢印キーやWASDでも)。扉の横の文字は、その向こうの部屋から伝わる気配です。</p>'}`;
     }
 
     flashHit() {
@@ -177,7 +185,7 @@
 
     refreshCooldown() {
       if (!this.v || this.v.phase !== 'explore' || this.v.spectator) return;
-      const cd = this.api.remaining(this.v.me.cooldownUntil) > 0;
+      const cd = this.api.remaining(this.v.me.cooldownUntil) > 0 || this.v.me.torch < this.v.me.cost;
       this.root.querySelectorAll('.mk-door').forEach((b) => { b.disabled = cd; });
     }
 
@@ -189,7 +197,8 @@
         <button class="btn btn-block" data-act="chalk" ${v.me.chalk < 1 || hereMarked || v.phase !== 'explore' ? 'disabled' : ''}>
           <span class="mk-chalk" style="--c:${v.me.color}">〆</span> ${this.esc(v.me.colorName)}のチョークで印をつける(残り${v.me.chalk})
         </button>
-        <p class="kt-note">印はこの部屋に入った仲間にも見えます。「${this.esc(v.me.colorName)}の印を探して」のように使えます。</p>`;
+        <p class="kt-note">印はこの部屋に入った仲間にも見えます。「${this.esc(v.me.colorName)}の印を探して」のように使えます。</p>
+        ${v.room.others.filter((o) => o.id).map((o) => `<button class="btn btn-small btn-block" data-give="${this.esc(o.id)}" ${v.me.torch < 1 ? 'disabled' : ''}>🔥 ${this.esc(o.name)}に松明を1本渡す</button>`).join('')}`;
     }
 
     renderMap(v) {
@@ -231,7 +240,7 @@
         <h3 class="kb-sub">パーティ</h3>
         <ul class="kt-team">${v.party.map((p) => `
           <li><i class="dot" style="background:${p.color}"></i><span class="player-name">${e(p.name)}</span>
-            ${p.cpu ? (p.found ? `<span class="tag tag-done">${e(p.following)}と同行中</span>` : '<span class="tag">助けを待っている</span>') : ''}</li>`).join('')}</ul>
+            ${p.cpu ? (p.found ? `<span class="tag tag-done">${e(p.following)}と同行中</span>` : '<span class="tag">助けを待っている</span>') : `<span class="kt-tickets">🔥${p.torch}</span>`}</li>`).join('')}</ul>
         <p class="kt-note">全員(CPUの仲間も)が同じ部屋に集まれば、この階はクリアです。</p>`;
     }
 

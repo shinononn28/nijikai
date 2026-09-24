@@ -7,9 +7,11 @@ const kaito = require('./kaito');
 const nimaijita = require('./nimaijita');
 const gaikou = require('./gaikou');
 const meikyu = require('./meikyu');
+const kijun = require('./kijun');
 
 const catalog = [
   kaburi,
+  kijun,
   moon,
   kaito,
   nimaijita,

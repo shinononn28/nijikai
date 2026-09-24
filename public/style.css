@@ -857,3 +857,46 @@ th:not(:first-child) { text-align: right; }
 .mk-rank { font-family: var(--font-display); font-size: 5rem; line-height: 1; color: var(--red); }
 .mk-end-sub { font-weight: 700; }
 .mk-end .gk-table { max-width: 420px; }
+
+.mk-torch-team { grid-column: 1 / -1; font-size: 0.8rem; color: var(--felt-muted); }
+.mk-stuck { margin-top: 0.5rem; text-align: center; font-weight: 700; color: #ffb3a8; }
+
+/* ---------- 基準当て ---------- */
+.kj-banner { text-align: center; background: var(--card); color: var(--ink); border-radius: var(--radius-card); padding: 0.8rem 1rem 1rem; outline: 2px solid var(--red); outline-offset: -8px; box-shadow: 0 8px 0 rgba(0, 0, 0, 0.22); }
+.kj-label { font-size: 0.8rem; font-weight: 700; color: var(--red); }
+.kj-crit { font-family: var(--font-display); font-size: clamp(1.6rem, 5vw, 2.4rem); line-height: 1.25; }
+.kj-hidden { color: var(--muted); }
+.kj-main { display: grid; gap: 1rem; }
+.kj-cards { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.kj-card { border: 2px solid var(--line); background: #fff; color: var(--ink); border-radius: 8px; padding: 0.45rem 0.8rem; font-weight: 700; font-size: 1rem; display: inline-grid; justify-items: center; cursor: pointer; box-shadow: 0 3px 0 var(--line); }
+.kj-card small { font-size: 0.68rem; font-weight: 500; color: var(--muted); }
+.kj-card:disabled { cursor: default; }
+.kj-card.is-own { border-style: dashed; }
+.kj-card.is-sel { border-color: var(--red); background: #fff3f0; box-shadow: 0 3px 0 var(--red); }
+.kj-options { display: grid; gap: 0.5rem; }
+.kj-turn { font-weight: 700; color: var(--red); }
+.kj-wait { color: var(--muted); font-weight: 700; }
+.kj-judge { display: grid; gap: 0.6rem; }
+.kj-judge p { font-weight: 700; }
+.kj-judge-btns { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.5rem; }
+.kj-asks { display: grid; gap: 0.35rem; }
+.kj-asks li { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.95rem; }
+.kj-w { border-radius: 6px; padding: 0.1rem 0.5rem; background: var(--paper); }
+.kj-w.is-win { background: #fff3c4; font-weight: 700; }
+.kj-mark { font-family: var(--font-display); color: var(--red); }
+.kj-rank { display: grid; gap: 0.5rem; }
+.kj-rank-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.kj-rank-card { min-width: 8rem; }
+.kj-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+.kj-result { display: grid; gap: 0.4rem; }
+.kj-result li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; padding: 0.4rem 0; border-bottom: 1px dashed var(--line); }
+.kj-result .rank { font-family: var(--font-display); color: var(--red); min-width: 2.5em; }
+.kj-word { font-weight: 700; font-size: 1.05rem; }
+.kj-who { color: var(--muted); font-size: 0.85rem; }
+.kj-result .num { margin-left: auto; font-weight: 700; }
+.kj-guess { font-size: 0.82rem; }
+.kj-hit { color: var(--good); font-weight: 700; }
+.kj-near { color: #b07f22; font-weight: 700; }
+.kj-miss { color: var(--muted); }
+@media (min-width: 1100px) { .kj-layout { grid-template-columns: minmax(0, 1fr) minmax(250px, 300px); } }
+.kj-hand { min-height: 3rem; }

@@ -173,9 +173,13 @@ class MeikyuGame {
       m.found = false;
       m.follow = null;
     }
-    // 松明:その階で「地図が見えていれば最短で何歩で集まれるか」の約2.4倍+8本。迷宮の形によらず難しさをそろえる
-    this.torchMax = Math.ceil(this.shortestGather() * 2.4) + 8;
-    this.torch = this.torchMax;
+    // 松明は各自が持つ(1人が全部探索して回る、という解き方をできなくするため)。
+    // 本数は「地図が見えていれば、その人が集合場所まで何歩か」の約2.4倍+6本。遠い人ほど多い
+    for (const [m, need] of this.shortestShares()) {
+      m.torch = Math.ceil(need * 2.4) + 6;
+      m.torchMax = m.torch;
+    }
+    this.syncTorch();
     // 魔物:誰からも遠い部屋から
     if (this.s.monster) {
       const far = [...this.maze.rooms].sort((a, b) => this.minDistToMembers(b) - this.minDistToMembers(a));
@@ -189,25 +193,49 @@ class MeikyuGame {
     this.later(this.s.floorMinutes * 60000, () => this.failFloor('time'));
     this.seq++;
     const note = this.compass === 'fixed' ? '方角:全員の画面で北が上' : '方角:各自の画面の向きがバラバラ(前後左右しかわからない)';
-    this.ctx.system(`${this.floor}階。松明は${this.torch}本。${note}`);
-    // CPUの仲間は定期的に様子を報告する
+    this.ctx.system(`${this.floor}階。松明は各自${this.humans().map((m) => `${this.nameOf(m)} ${m.torch}本`).join('、')}。${note}`);
+    // CPUの仲間は動かないので、最初に一度だけ様子を伝え、あとは足音が近づいたとき・名前を呼ばれたときに答える。
+    // 誰も来ないまま長く経ったときだけ、短く念押しする
     for (const m of this.members.filter((x) => x.cpu)) {
+      m.lastTalk = 0;
       this.later(rint(2500, 5000), () => this.cpuReport(m));
-      this.every(rint(22000, 28000), () => this.cpuReport(m));
+      this.every(90000, () => this.cpuRemind(m));
     }
     this.ctx.update();
   }
 
-  shortestGather() {
+  // 人間それぞれの「最短で集合するのに歩く歩数」の目安
+  shortestShares() {
     const humans = this.members.filter((m) => !m.cpu);
     const cpus = this.members.filter((m) => m.cpu);
-    if (!cpus.length) {
-      const ds = humans.map((m) => bfsDist(this.maze, m.room));
-      return Math.min(...this.maze.rooms.map((r) => ds.reduce((s, d) => s + (d.get(r) ?? 99), 0)));
+    const ds = humans.map((m) => bfsDist(this.maze, m.room));
+    let meet;
+    if (cpus.length) meet = cpus[0].room;
+    else meet = [...this.maze.rooms].sort((a, b) => ds.reduce((s, d) => s + d.get(a), 0) - ds.reduce((s, d) => s + d.get(b), 0))[0];
+    const share = humans.map((m, i) => [m, ds[i].get(meet) ?? 20]);
+    // 2人目以降の動けない仲間は、一番近い人が迎えに行って戻る分(同行中は1部屋2本)を足す
+    for (const c of cpus.slice(1)) {
+      const k = share.map(([m], i) => ds[i].get(c.room)).reduce((b, d, i, arr) => (d < arr[b] ? i : b), 0);
+      share[k][1] += (bfsDist(this.maze, c.room).get(meet) ?? 10) * 3;
     }
-    // 動けない仲間がいるときは、1人目の仲間の部屋に集まり、ほかの仲間は誰かが迎えに行って戻る目安
-    const d0 = bfsDist(this.maze, cpus[0].room);
-    return humans.reduce((s, m) => s + (d0.get(m.room) ?? 99), 0) + cpus.slice(1).reduce((s, c) => s + (d0.get(c.room) ?? 99) * 2, 0);
+    return share;
+  }
+
+  syncTorch() {
+    const hs = this.humans();
+    this.torch = hs.reduce((s, m) => s + m.torch, 0);
+    this.torchMax = hs.reduce((s, m) => s + m.torchMax, 0);
+  }
+
+  // 全員の松明が尽きて動けなくなったら、その階は失敗
+  checkStuck() {
+    if (this.phase !== 'explore') return;
+    const movable = this.humans().some((m) => m.torch >= this.moveCost(m));
+    if (!movable) this.failFloor('torch');
+  }
+
+  moveCost(m) {
+    return this.members.some((x) => x.follow === m.id) ? 2 : 1; // 負傷した仲間に肩を貸していると1部屋2本
   }
 
   minDistToMembers(room) {
@@ -266,6 +294,7 @@ class MeikyuGame {
   moveMember(m, to) {
     m.room = to;
     m.explored.add(to);
+    this.cpuHearSteps(to, m);
     // 見つけた仲間(CPU)はついてくる
     for (const f of this.members.filter((x) => x.follow === m.id)) {
       f.room = to;
@@ -287,11 +316,14 @@ class MeikyuGame {
     const dir = (relDir + m.rot) % 4;
     const to = this.neighbor(m.room, dir);
     if (!to) return;
+    const cost = this.moveCost(m);
+    if (m.torch < cost) return;
     m.cooldownUntil = now + MOVE_COOLDOWN;
-    this.torch -= 1;
+    m.torch -= cost;
+    this.syncTorch();
     this.moveMember(m, to);
-    if (this.torch <= 0) return this.failFloor('torch');
     this.checkGathered();
+    this.checkStuck();
   }
 
   // ---------- 魔物 ----------
@@ -309,7 +341,8 @@ class MeikyuGame {
 
   attack(m) {
     if (this.phase !== 'explore') return;
-    this.torch = Math.max(0, this.torch - MONSTER_DAMAGE);
+    m.torch = Math.max(0, m.torch - MONSTER_DAMAGE);
+    this.syncTorch();
     const exits = [0, 1, 2, 3].map((d) => this.neighbor(m.room, d)).filter(Boolean);
     const run = pick(exits);
     this.ctx.system(`${this.nameOf(m)}が魔物に襲われ、松明を${MONSTER_DAMAGE}本落として逃げ出した!`);
@@ -318,7 +351,7 @@ class MeikyuGame {
     for (const f of this.members.filter((x) => x.follow === m.id)) f.room = run;
     m.cooldownUntil = Date.now() + MOVE_COOLDOWN;
     m.lastHit = Date.now();
-    if (this.torch <= 0) this.failFloor('torch');
+    this.checkStuck();
   }
 
   // ---------- 部屋の様子 ----------
@@ -354,10 +387,41 @@ class MeikyuGame {
     return parts.join('。');
   }
 
-  cpuReport(m) {
-    if (this.phase !== 'explore' || m.found || this.s.cpuChat === false) return;
-    const text = `${pick(['足を怪我して動けない…', 'ここから動けないんだ。', '誰か来てくれ!'])}${this.describe(m)}`;
+  cpuSay(m, text) {
+    if (this.phase !== 'explore' || m.found || this.s.cpuChat === false) return false;
+    m.lastTalk = Date.now();
     this.ctx.say(m.id, m.name, text);
+    return true;
+  }
+
+  cpuReport(m) {
+    this.cpuSay(m, `${pick(['足を怪我して動けない…', 'ここから動けないんだ。', '誰か来てくれ!'])}${this.describe(m)}`);
+  }
+
+  cpuRemind(m) {
+    if (Date.now() - m.lastTalk < 60000) return;
+    const r = m.room;
+    const f = r.features.map((k) => feature(k).name);
+    this.cpuSay(m, pick([`まだ${f.length ? `${f[0]}の部屋` : '何もない部屋'}で待ってる…`, '松明、大丈夫か?こっちはまだ動けない', '誰か近くにいないか?']));
+  }
+
+  // 人が隣の部屋に来たら、足音が聞こえたと知らせる
+  cpuHearSteps(room, mover) {
+    for (const c of this.members.filter((x) => x.cpu && !x.found)) {
+      const d = [0, 1, 2, 3].find((dir) => this.neighbor(c.room, dir) === room);
+      if (d === undefined || Date.now() - c.lastTalk < 15000) continue;
+      this.cpuSay(c, `${this.dirLabel(c, d)}のほうから足音が聞こえる!${this.nameOf(mover)}か?こっちだ!`);
+    }
+  }
+
+  // チャットで名前を呼ばれたら、今の様子を答える
+  onPublicChat(pid, text) {
+    if (this.phase !== 'explore' || this.s.cpuChat === false) return;
+    for (const c of this.members.filter((x) => x.cpu && !x.found)) {
+      const short = c.name.replace(/\(.*\)$/, '');
+      if (!text.includes(short) || Date.now() - c.lastTalk < 8000) continue;
+      this.later(rint(1200, 2500), () => this.cpuSay(c, `呼んだか?${this.describe(c)}`));
+    }
   }
 
   // ---------- 入力 ----------
@@ -375,6 +439,13 @@ class MeikyuGame {
       if (this.phase !== 'explore' || m.chalk < 1 || m.room.marks.some((k) => k.id === m.id)) return;
       m.chalk--;
       m.room.marks.push({ id: m.id, color: m.color, colorName: m.colorName });
+    } else if (type === 'give') {
+      const to = this.humans().find((x) => x.id === payload.to);
+      if (this.phase !== 'explore' || !to || to === m || to.room !== m.room || m.torch < 1) return;
+      m.torch -= 1;
+      to.torch += 1;
+      this.syncTorch();
+      this.ctx.system(`${this.nameOf(m)}が${this.nameOf(to)}に松明を1本渡した`);
     } else if (type === 'report') {
       if (this.phase !== 'explore') return;
       const now = Date.now();
@@ -418,6 +489,7 @@ class MeikyuGame {
         name: this.nameOf(x),
         color: x.color,
         cpu: x.cpu,
+        torch: x.cpu ? null : x.torch,
         found: x.found,
         following: x.follow ? this.nameOf(this.member(x.follow)) : null,
       })),
@@ -434,6 +506,9 @@ class MeikyuGame {
         color: m.color,
         colorName: m.colorName,
         chalk: m.chalk,
+        torch: m.torch,
+        torchMax: m.torchMax,
+        cost: this.moveCost(m),
         rot: m.rot,
         cooldownUntil: m.cooldownUntil,
         lastHit: m.lastHit || 0,
@@ -442,7 +517,7 @@ class MeikyuGame {
         key: `${r.x},${r.y}`,
         features: r.features.map((k) => ({ name: feature(k).name, icon: feature(k).icon })),
         marks: r.marks.map((k) => ({ color: k.color, colorName: k.colorName })),
-        others: others.map((x) => ({ name: this.nameOf(x), color: x.color, cpu: x.cpu })),
+        others: others.map((x) => ({ id: x.cpu ? null : x.id, name: this.nameOf(x), color: x.color, cpu: x.cpu })),
         monster: !!(this.monster && this.monster.room === r),
         // 扉はその人の画面の向き(0=上/前, 1=右, 2=下/後ろ, 3=左)で返す
         doors: [0, 1, 2, 3].map((rel) => {
@@ -470,7 +545,7 @@ module.exports = {
   tagline: 'はぐれたパーティが、チャットで様子を伝え合って迷宮の中で合流する協力ゲーム。',
   description:
     '見えるのは自分の部屋の目印・扉・扉の向こうの気配だけ。チャットで「石像があって東から水の音」と伝え合い、全員が同じ部屋に集まれば次の階へ。' +
-    '松明はチーム共有で1部屋1本、徘徊する魔物に出くわすと松明を落とします。残った松明でランクが決まります。',
+    '松明は各自が持ち、1部屋1本(負傷した仲間に肩を貸すと2本)。同じ部屋にいれば分け合えます。徘徊する魔物に出くわすと松明を落とします。残った松明でランクが決まります。',
   minPlayers: 2,
   maxPlayers: 6,
   cpu: true,
