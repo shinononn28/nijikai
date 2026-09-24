@@ -16,7 +16,8 @@ const DIVIDEND_CAP = 2;
 const BETRAY_PENALTY = 2;
 const COOLDOWN = 2;
 const OBJECTIVE_POINTS = 2;
-const RAIL_CAP = 3; // 鉄道で1回の命令に運べる兵の上限(遠くへの奇襲はできるが、大軍の瞬間移動はできない)
+const RAIL_CAP = 3;
+const REBEL_BASE = 4; // 反乱軍の兵(+ラウンド数の半分) // 鉄道で1回の命令に運べる兵の上限(遠くへの奇襲はできるが、大軍の瞬間移動はできない)
 
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -344,6 +345,9 @@ class GaikouGame {
     this.ctx.update();
   }
 
+  // 再起:領地を失った国は、トップの国の領地で反乱軍として蜂起する。
+  // 囲まれてすぐ潰されないよう、(1)兵はラウンドが進むほど多く (2)隣の手薄な領地も1つ一緒に取り
+  // (3)蜂起したラウンドは攻撃を受けない(守護)。
   respawnRebels() {
     for (const n of this.nations) {
       if (this.owned(n.id).length > 0) continue;
@@ -352,11 +356,24 @@ class GaikouGame {
         .sort((a, b) => this.stars(b.id) - this.stars(a.id) || this.troops(b.id) - this.troops(a.id))[0];
       if (!leader) continue;
       const lands = this.owned(leader.id).filter((i) => i !== leader.capital);
-      const spot = lands.sort((a, b) => this.terr[a].troops - this.terr[b].troops)[0];
-      if (spot === undefined) continue;
-      this.terr[spot] = { owner: n.id, troops: 3 };
-      this.ctx.system(`${this.label(n)}が、${this.nm(leader)}の${this.terrName(spot)}で反乱軍として蜂起した!`);
+      if (!lands.length) continue;
+      // 周りに敵の兵が少なく、手薄な場所を選ぶ
+      const danger = (i) => this.terr[i].troops + this.map.adj[i].reduce((sum, x) => sum + (this.terr[x].owner && this.terr[x].owner !== n.id ? this.terr[x].troops * 0.3 : 0), 0);
+      const spot = [...lands].sort((a, b) => danger(a) - danger(b))[0];
+      const troops = REBEL_BASE + Math.floor(this.round / 2);
+      this.terr[spot] = { owner: n.id, troops };
+      const extra = this.map.adj[spot]
+        .filter((x) => this.terr[x].owner === leader.id && x !== leader.capital)
+        .sort((a, b) => this.terr[a].troops - this.terr[b].troops)[0];
+      if (extra !== undefined) this.terr[extra] = { owner: n.id, troops: 2 };
+      n.protectedRound = this.round;
+      const where = extra !== undefined ? `${this.terrName(spot)}と${this.terrName(extra)}` : this.terrName(spot);
+      this.ctx.system(`${this.label(n)}が、${this.nm(leader)}の${where}で反乱軍として蜂起した!(兵${troops}。このラウンドは攻撃を受けない)`);
     }
+  }
+
+  isProtected(nid) {
+    return !!nid && this.nation(nid)?.protectedRound === this.round;
   }
 
   // 命令:{from, to, n, kind:'move'|'support', side?}
@@ -372,6 +389,8 @@ class GaikouGame {
       if (!this.map.adj[from].includes(to) || !(count > 0)) continue;
       if (!this.map.roadAdj[from].includes(to)) count = Math.min(count, RAIL_CAP); // 鉄道は定員つき
       const kind = o.kind === 'support' ? 'support' : 'move';
+      // 蜂起したばかりの国(守護中)には攻め込めない
+      if (kind === 'move' && this.terr[to].owner !== nid && this.isProtected(this.terr[to].owner)) continue;
       let side = null;
       if (kind === 'support') {
         side = String(o.side || '');
@@ -661,6 +680,7 @@ class GaikouGame {
       const targets = this.map.adj[from]
         .filter((x) => this.terr[x].owner !== n.id)
         .filter((x) => !partners.has(this.terr[x].owner) || betray.has(this.terr[x].owner))
+        .filter((x) => !this.isProtected(this.terr[x].owner))
         .map((x) => {
           const t = this.terr[x];
           const need = t.troops + (t.owner ? 3 : 1);
@@ -793,6 +813,7 @@ class GaikouGame {
         lands: this.owned(n.id).length,
         troops: this.troops(n.id),
         broken: n.broken,
+        protected: this.isProtected(n.id),
         ready: this.phase === 'orders' ? n.ready || n.cpu : null,
         connected: this.isActive(n),
         objective: ended && n.objective ? { text: n.objective.text, done: this.objectiveDone(n) } : null,

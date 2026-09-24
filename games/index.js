@@ -6,21 +6,15 @@ const moon = require('./moon');
 const kaito = require('./kaito');
 const nimaijita = require('./nimaijita');
 const gaikou = require('./gaikou');
+const meikyu = require('./meikyu');
 
 const catalog = [
   kaburi,
-  {
-    id: 'wasureta',
-    name: '忘れた単語',
-    tagline: '一瞬だけ見えた単語を思い出す。誰も書かなかった単語だけが得点。',
-    minPlayers: 3,
-    maxPlayers: 12,
-    comingSoon: true,
-  },
   moon,
   kaito,
   nimaijita,
   gaikou,
+  meikyu,
 ];
 
 const getGame = (id) => catalog.find((g) => g.id === id) || null;

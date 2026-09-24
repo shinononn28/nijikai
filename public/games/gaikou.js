@@ -352,6 +352,7 @@
             ${this.from === i ? `<circle class="t-from" cx="${n.x}" cy="${n.y}" r="30"/>` : ''}
             <text class="t-n" x="${n.x}" y="${n.y + 7}">${t.troops}</text>
             ${n.star ? `<text class="t-star" x="${n.x + 20}" y="${n.y - 14}">★</text>` : ''}
+            ${owner?.protected && !animating ? `<circle class="t-shield" cx="${n.x}" cy="${n.y}" r="28"/><text class="t-shield-icon" x="${n.x + 20}" y="${n.y + 24}">🛡</text>` : ''}
             ${v.nations.some((x) => x.capital === i) ? `<text class="t-cap" x="${n.x - 21}" y="${n.y - 14}">♛</text>` : ''}
             <text class="n-label" x="${n.x}" y="${n.y + 42}">${this.esc(n.name)}</text>
             <circle class="n-hit" cx="${n.x}" cy="${n.y}" r="32"/>
@@ -389,7 +390,8 @@
       if (this.to === null) return [];
       const owner = v.terr[this.to].owner;
       if (owner === my.id) return [{ kind: 'move', side: null, label: '兵を移動する' }];
-      const out = [{ kind: 'move', side: null, label: owner ? `${this.nation(owner).title}に攻め込む` : '占領しに行く' }];
+      const guarded = owner && this.nation(owner).protected;
+      const out = guarded ? [] : [{ kind: 'move', side: null, label: owner ? `${this.nation(owner).title}に攻め込む` : '占領しに行く' }];
       if (owner) out.push({ kind: 'support', side: owner, label: `${this.nation(owner).title}の守備に援軍` });
       for (const n of v.nations) {
         if (n.id === my.id || n.id === owner) continue;
@@ -451,6 +453,7 @@
           <p class="kt-pick"><strong>${e(this.tname(this.from))}</strong> ${rail ? '🚂' : '→'} <strong>${e(this.tname(this.to))}</strong></p>
           ${rail ? `<p class="kt-note">鉄道で移動します。1回の命令で運べる兵は${v.map.railCap}までです。</p>` : ''}
           <div class="gk-opts">${opts.map((o, i) => `<button class="btn btn-small${this.choice && o.kind === this.choice.kind && o.side === this.choice.side ? ' btn-primary' : ''}" data-opt="${i}">${e(o.label)}</button>`).join('')}</div>
+          ${this.nation(v.terr[this.to].owner)?.protected ? `<p class="kt-note">${e(this.nation(v.terr[this.to].owner).title)}は蜂起したばかりで、このラウンドは攻め込めません(援軍は出せます)。</p>` : ''}
           ${this.choice?.kind === 'support' ? '<p class="kt-note">援軍は戦闘に加わって兵力を足し、終わると元の領地へ戻ります(その間、元の領地の守りは薄くなります)。</p>' : ''}
           <div class="gk-count">
             <button class="btn btn-small" data-cnt="-1" ${this.count <= 1 ? 'disabled' : ''}>−</button>
@@ -563,7 +566,7 @@
         <h3 class="kb-sub">国の様子(★${v.winStars}つで即勝利)</h3>
         <ul class="kt-team">${v.nations.map((n) => `
           <li><i class="dot" style="background:${n.color}"></i><span class="player-name">${e(n.title)}${n.cpu ? '<small class="gk-leader">CPU</small>' : ''}</span>
-            <span class="kt-tickets">★${n.stars}・領地${n.lands}・兵${n.troops}${n.broken ? `・破約${n.broken}` : ''}</span>
+            <span class="kt-tickets">★${n.stars}・領地${n.lands}・兵${n.troops}${n.broken ? `・破約${n.broken}` : ''}${n.protected ? '・🛡守護中' : ''}</span>
             ${v.phase === 'orders' ? (n.ready ? '<span class="tag tag-done">確定</span>' : '<span class="tag">考え中</span>') : ''}</li>`).join('')}</ul>
         <details class="gk-rules">
           <summary>勝敗の決め方</summary>
@@ -571,6 +574,7 @@
             <li><strong>即勝利</strong>:ラウンドの解決後に★が${v.winStars}つ以上ある国があれば、その時点で終了。同じラウンドに複数の国が届いたら、${v.rules.instant.map((x) => e(x)).join(' → ')}の順に比べて多い国の勝ち。</li>
             <li><strong>最終ラウンド後</strong>:全部の国を${v.rules.final.map((x) => e(x)).join(' → ')}の順に比べて多い国の勝ち。</li>
             <li>最後まで同じなら同率で勝ち。★や領地は、そのラウンドの戦闘と増援が終わったあとの数で数えます。</li>
+            <li><strong>再起</strong>:領地をすべて失った国は、次のラウンドの始めにトップの国の手薄な場所で反乱軍(兵4+ラウンド数の半分、隣の領地も1つ)として蜂起し、そのラウンドは攻撃を受けません(🛡)。</li>
           </ul>
         </details>
         ${v.objectivesOn && v.me?.objective && v.phase !== 'ended' ? `<div class="gk-obj"><strong>あなたの秘密の目標(+2点)</strong><p>${e(v.me.objective.text)}</p><small>${v.me.objective.done ? '今は達成しています' : '今は未達成'}</small></div>` : ''}
