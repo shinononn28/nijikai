@@ -16,6 +16,7 @@ const DIVIDEND_CAP = 2;
 const BETRAY_PENALTY = 2;
 const COOLDOWN = 2;
 const OBJECTIVE_POINTS = 2;
+const RAIL_CAP = 3; // 鉄道で1回の命令に運べる兵の上限(遠くへの奇襲はできるが、大軍の瞬間移動はできない)
 
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -69,18 +70,46 @@ function generateMap(nationCount) {
       if (Math.random() < 0.18) edges.push(r % 2 ? [id(c + 1, r), id(c, r + 1)] : [id(c, r), id(c + 1, r + 1)]);
     }
   }
-  const adj = nodes.map(() => []);
-  for (const [a, b] of edges) { adj[a].push(b); adj[b].push(a); }
-  const dist = nodes.map((n) => {
-    const d = new Array(nodes.length).fill(Infinity);
-    d[n.id] = 0;
-    const q = [n.id];
-    while (q.length) { const x = q.shift(); for (const y of adj[x]) if (d[y] === Infinity) { d[y] = d[x] + 1; q.push(y); } }
-    return d;
-  });
+  const bfs = (adjList) =>
+    nodes.map((n) => {
+      const d = new Array(nodes.length).fill(Infinity);
+      d[n.id] = 0;
+      const q = [n.id];
+      while (q.length) { const x = q.shift(); for (const y of adjList[x]) if (d[y] === Infinity) { d[y] = d[x] + 1; q.push(y); } }
+      return d;
+    });
+  const roadAdj = nodes.map(() => []);
+  for (const [a, b] of edges) { roadAdj[a].push(b); roadAdj[b].push(a); }
+  const roadDist = bfs(roadAdj);
+
+  // 鉄道:道では遠い領地どうしを直結する。端から固めた内側の領地も狙われうるようにするため
+  const railCount = nationCount >= 5 ? 3 : 2;
+  const minD = Math.max(3, Math.floor((cols + rows) / 2) - 1);
+  const rails = [];
+  const stations = new Set();
+  const nearStation = (x) => [...stations].some((st) => roadDist[st][x] <= 1);
+  const pairs = [];
+  const gridDist = (a, b) => Math.abs(nodes[a].c - nodes[b].c) + Math.abs(nodes[a].r - nodes[b].r);
+  for (let a = 0; a < nodes.length; a++) {
+    for (let b = a + 1; b < nodes.length; b++) {
+      // 道で遠いだけでなく、地図の上でも離れている2か所を結ぶ(見た目にも「遠くへの近道」になるように)
+      if (roadDist[a][b] >= minD && gridDist(a, b) >= minD) pairs.push([a, b]);
+    }
+  }
+  for (const [a, b] of shuffle(pairs)) {
+    if (rails.length >= railCount) break;
+    if (nearStation(a) || nearStation(b)) continue;
+    rails.push([a, b]);
+    stations.add(a);
+    stations.add(b);
+  }
+  const adj = roadAdj.map((list) => [...list]);
+  for (const [a, b] of rails) { adj[a].push(b); adj[b].push(a); }
+  for (const st of stations) nodes[st].station = true;
+  const dist = bfs(adj);
   const width = PAD * 2 + GX * (cols - 1) + 26;
   const height = PAD * 2 + GY * (rows - 1);
-  return { nodes: nodes.map(({ c, r, ...n }) => n), edges, adj, dist, width, height, cols, rows };
+  return { nodes: nodes.map(({ c, r, ...n }) => n), edges, rails, adj, roadAdj, dist, width, height, cols, rows };
 }
 
 function spread(map, count, gap, excluded = new Set()) {
@@ -120,7 +149,7 @@ class GaikouGame {
 
     // 領地:owner(国id or null)と兵
     this.terr = this.map.nodes.map((n) => ({ owner: null, troops: 0 }));
-    const capitals = spread(this.map, count, 3);
+    const capitals = spread(this.map, count, 3, new Set(this.map.nodes.filter((n) => n.station).map((n) => n.id)));
     this.nations.forEach((n, i) => {
       n.capital = capitals[i];
       this.map.nodes[n.capital].star = true;
@@ -277,6 +306,7 @@ class GaikouGame {
       let count = Math.floor(Number(o?.n));
       if (!this.terr[from] || !this.terr[to] || this.terr[from].owner !== nid) continue;
       if (!this.map.adj[from].includes(to) || !(count > 0)) continue;
+      if (!this.map.roadAdj[from].includes(to)) count = Math.min(count, RAIL_CAP); // 鉄道は定員つき
       const kind = o.kind === 'support' ? 'support' : 'move';
       let side = null;
       if (kind === 'support') {
@@ -642,7 +672,7 @@ class GaikouGame {
       round: this.round,
       rounds: this.s.rounds,
       endsAt: this.phase === 'orders' ? this.endsAt : null,
-      map: { width: this.map.width, height: this.map.height, nodes: this.map.nodes, edges: this.map.edges },
+      map: { width: this.map.width, height: this.map.height, nodes: this.map.nodes, edges: this.map.edges, rails: this.map.rails, railCap: RAIL_CAP },
       terr: this.terr,
       starTotal: this.starTotal,
       winStars: this.winStars,
@@ -687,7 +717,7 @@ module.exports = {
   name: '小国の外交',
   tagline: '小さな大陸で陣取り。条約を守るか、奇襲で裏切るか。',
   description:
-    '全員が同時に命令を出して陣取りをします。不可侵条約は、お互い守れば平和配当(兵+1)、片方だけ攻めれば奇襲ボーナス(+2)、両方攻めれば共倒れ(増援−2)。' +
+    '全員が同時に命令を出して陣取りをします。道のほかに遠くの領地どうしを結ぶ鉄道があり(1回の命令で3兵まで)、内側の領地も安全ではありません。不可侵条約は、お互い守れば平和配当(兵+1)、片方だけ攻めれば奇襲ボーナス(+2)、両方攻めれば共倒れ(増援−2)。' +
     '★の4割を取れば即勝利、8ラウンド終われば★と秘密の目標の点数で勝負。領地を失っても、トップの国で反乱軍として再起します。',
   minPlayers: 1,
   maxPlayers: 6,

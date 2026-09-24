@@ -1,6 +1,24 @@
 (() => {
   'use strict';
 
+  // 鉄道は少し弧を描いて引く(道と重ならないように)。コマもこの弧に沿って動く
+  const RAIL_BEND = 46;
+  function railCtrl(a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: (a.x + b.x) / 2 - (dy / len) * RAIL_BEND, y: (a.y + b.y) / 2 + (dx / len) * RAIL_BEND };
+  }
+  function railPoint(a, b, k) {
+    const c = railCtrl(a, b);
+    const u = 1 - k;
+    return { x: u * u * a.x + 2 * u * k * c.x + k * k * b.x, y: u * u * a.y + 2 * u * k * c.y + k * k * b.y };
+  }
+
+  // 戦闘の結果の言葉:無所属の土地は「占領」、他国の領地は「陥落/防衛」
+  const resultText = (b) =>
+    b.result === 'taken' ? (b.owner ? '陥落' : '占領') : b.result === 'held' ? (b.owner ? '防衛' : '占領失敗') : '押し返し';
+
   // 解決の演出のタイミング(ミリ秒)
   const FX = { TRAVEL: 1100, BATTLE: 900, BACK: 600, FLASH: 900 };
   FX.SWAP = FX.TRAVEL + FX.BATTLE;
@@ -47,16 +65,14 @@
     // ---------- 解決の演出 ----------
     startAnim(r) {
       cancelAnimationFrame(this.raf);
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        this.anim = { r, t0: performance.now() - FX.SWAP, reduced: true };
-      } else {
-        this.anim = { r, t0: performance.now() };
-      }
+      // 「動きを減らす」設定の人には、コマを動かさずに矢印と結果を静止表示する(情報は同じ)
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      this.anim = { r, t0: performance.now(), reduced };
       this.swapped = false;
       const loop = () => {
         if (!this.anim) return;
         const t = performance.now() - this.anim.t0;
-        if (t >= FX.TOTAL) return this.endAnim();
+        if (t >= FX.TOTAL + (this.anim.reduced ? 1200 : 0)) return this.endAnim();
         if (!this.swapped && t >= FX.SWAP) {
           this.swapped = true;
           this.renderMap(this.v);
@@ -85,6 +101,15 @@
       const battleAt = new Map(r.battles.map((b) => [b.node, b]));
 
       // 兵のコマ:行って(援軍と押し返された攻撃は)帰ってくる
+      const kindOf = (m) => (m.kind === 'support' ? 'sup' : r.prevTerr[m.to].owner === m.nation ? 'move' : r.prevTerr[m.to].owner ? 'atk' : 'occ');
+      if (this.anim.reduced && t < FX.SWAP) {
+        for (const m of r.moves) {
+          const a = N[m.from];
+          const b = N[m.to];
+          out.push(`<line class="fx-line fx-${kindOf(m)}" x1="${a.x}" y1="${a.y}" x2="${a.x + (b.x - a.x) * 0.75}" y2="${a.y + (b.y - a.y) * 0.75}" stroke="${color(m.nation)}"/>`);
+          out.push(`<g class="fx-tok fx-${kindOf(m)}"><circle cx="${a.x + (b.x - a.x) * 0.75}" cy="${a.y + (b.y - a.y) * 0.75}" r="13" fill="${color(m.nation)}"/><text x="${a.x + (b.x - a.x) * 0.75}" y="${a.y + (b.y - a.y) * 0.75 + 5}">${m.n}</text></g>`);
+        }
+      }
       for (const m of this.anim.reduced ? [] : r.moves) {
         const a = N[m.from];
         const b = N[m.to];
@@ -97,21 +122,21 @@
         else if (goesBack && t < FX.SWAP + FX.BACK) k = reach * (1 - ease((t - FX.SWAP) / FX.BACK));
         else continue; // 到着して合流したか、戦いで散った
         const lost = b0 && t >= FX.TRAVEL + FX.BATTLE * 0.5 && !goesBack && b0.winner !== m.nation;
-        const x = a.x + (b.x - a.x) * k;
-        const y = a.y + (b.y - a.y) * k;
-        out.push(`<g class="fx-tok${m.kind === 'support' ? ' is-sup' : ''}${lost ? ' is-lost' : ''}"><circle cx="${x}" cy="${y}" r="14" fill="${color(m.nation)}"/><text x="${x}" y="${y + 5}">${m.n}</text></g>`);
+        const pt = this.isRail(m.from, m.to) ? railPoint(a, b, k) : { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+        const { x, y } = pt;
+        out.push(`<g class="fx-tok fx-${kindOf(m)}${lost ? ' is-lost' : ''}"><circle cx="${x}" cy="${y}" r="14" fill="${color(m.nation)}"/><text x="${x}" y="${y + 5}">${m.n}</text></g>`);
       }
 
       // 戦闘:広がる輪と結果
       if (t >= FX.TRAVEL * 0.85 && t < FX.SWAP + FX.FLASH) {
-        const p = Math.min(1, (t - FX.TRAVEL * 0.85) / FX.BATTLE);
+        const p = this.anim.reduced ? 0.5 : Math.min(1, (t - FX.TRAVEL * 0.85) / FX.BATTLE);
         for (const b of r.battles) {
           const n = N[b.node];
           const rad = 26 + p * 22;
-          out.push(`<circle class="fx-burst" cx="${n.x}" cy="${n.y}" r="${rad}" style="opacity:${1 - p * 0.7}"/>`);
-          if (t >= FX.TRAVEL + FX.BATTLE * 0.4) {
-            const txt = b.result === 'taken' ? '陥落' : b.result === 'held' ? '防衛' : '押し返し';
-            out.push(`<text class="fx-result" x="${n.x}" y="${n.y - 34}" fill="${b.result === 'taken' ? color(b.winner) : '#15211d'}">${txt}</text>`);
+          // 他国の領地への攻撃は赤い衝撃、無所属の土地の占領は控えめな輪
+          out.push(`<circle class="fx-burst${b.owner ? '' : ' is-occ'}" cx="${n.x}" cy="${n.y}" r="${rad}" style="opacity:${1 - p * 0.7}"/>`);
+          if (this.anim.reduced || t >= FX.TRAVEL + FX.BATTLE * 0.4) {
+            out.push(`<text class="fx-result" x="${n.x}" y="${n.y - 34 < 44 ? n.y + 60 : n.y - 34}" fill="${b.result === 'taken' ? color(b.winner) : '#15211d'}">${resultText(b)}</text>`);
           }
         }
       }
@@ -131,12 +156,21 @@
 
     buildAdj(v) {
       const adj = v.map.nodes.map(() => []);
-      for (const [a, b] of v.map.edges) {
+      for (const [a, b] of [...v.map.edges, ...(v.map.rails || [])]) {
         adj[a].push(b);
         adj[b].push(a);
       }
+      this.railSet = new Set((v.map.rails || []).flatMap(([a, b]) => [`${a}-${b}`, `${b}-${a}`]));
       this.adjFor = v.map;
       return adj;
+    }
+    isRail(a, b) {
+      return this.railSet?.has(`${a}-${b}`);
+    }
+    // この命令で出せる兵の上限(鉄道は定員つき)
+    cap(from, to) {
+      const n = this.avail(from);
+      return to !== null && this.isRail(from, to) ? Math.min(n, this.v.map.railCap) : n;
     }
 
     nation(id) {
@@ -169,7 +203,7 @@
           <div class="kt-layout">
             <div class="kt-map-wrap">
               <svg id="gk-map" class="kt-map gk-map" viewBox="0 0 ${v.map.width} ${v.map.height}" role="group" aria-label="大陸の地図"></svg>
-              <div class="kt-legend"><span>★ 拠点(1つにつき毎ラウンド兵+1)</span><span>♛ 首都</span><span>数字は兵の数</span></div>
+              <div class="kt-legend"><span>★ 拠点(1つにつき毎ラウンド兵+1)</span><span><i class="lg lg-rail"></i>鉄道(1回に${v.map.railCap}兵まで)</span><span>♛ 首都</span><span>数字は兵の数</span></div>
             </div>
             <aside class="kt-side">
               <section class="kt-panel" id="gk-orders"></section>
@@ -192,6 +226,13 @@
         }
       });
       this.root.querySelector('#gk-orders').addEventListener('click', (e) => this.onOrders(e));
+      this.root.querySelector('#gk-last').addEventListener('click', (e) => {
+        if (e.target.closest('[data-replay]') && this.v.lastResult) {
+          this.startAnim(this.v.lastResult);
+          this.renderMap(this.v);
+          this.root.querySelector('#gk-map').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
       this.root.querySelector('#gk-treaty').addEventListener('click', (e) => {
         const b = e.target.closest('[data-tr]');
         if (b) this.api.send(b.dataset.tr, { nation: b.dataset.n });
@@ -211,13 +252,18 @@
     renderMap(v) {
       const svg = this.root.querySelector('#gk-map');
       const N = v.map.nodes;
-      const animating = this.anim && performance.now() - this.anim.t0 < FX.SWAP;
+      const animating = !!this.anim && performance.now() - this.anim.t0 < FX.SWAP;
       const terrNow = animating ? this.anim.r.prevTerr : v.terr;
       const parts = [
         `<defs>${v.nations.map((n) => `<marker id="ar-${n.id}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${n.color}"/></marker>`).join('')}
           <marker id="ar-move" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#15211d"/></marker></defs>`,
       ];
       for (const [a, b] of v.map.edges) parts.push(`<line class="e-walk" x1="${N[a].x}" y1="${N[a].y}" x2="${N[b].x}" y2="${N[b].y}"/>`);
+      for (const [a, b] of v.map.rails || []) {
+        const c = railCtrl(N[a], N[b]);
+        const d = `M${N[a].x},${N[a].y} Q${c.x},${c.y} ${N[b].x},${N[b].y}`;
+        parts.push(`<path class="e-rail" d="${d}"/><path class="e-rail-ties" d="${d}"/>`);
+      }
 
       // 自分の命令の矢印(領地の上に重ねるので、あとで足す)
       const my = this.my();
@@ -233,7 +279,8 @@
         const ex = b.x - (dx / len) * 30;
         const ey = b.y - (dy / len) * 30;
         const own = v.terr[o.to].owner === my?.id;
-        const cls = o.kind === 'support' ? 'ord-sup' : own ? 'ord-move' : 'ord-atk';
+        const occ = !own && !v.terr[o.to].owner;
+        const cls = o.kind === 'support' ? 'ord-sup' : own ? 'ord-move' : occ ? 'ord-occ' : 'ord-atk';
         const marker = o.kind === 'support' ? `ar-${o.side}` : own ? 'ar-move' : `ar-${my.id}`;
         const stroke = o.kind === 'support' ? this.nation(o.side).color : own ? '#15211d' : my.color;
         arrows.push(`<line class="${cls}" x1="${sx}" y1="${sy}" x2="${ex}" y2="${ey}" stroke="${stroke}" marker-end="url(#${marker})"/>`);
@@ -250,6 +297,7 @@
         parts.push(`
           <g class="terr${mine ? ' is-mine' : ''}${this.from === i ? ' is-from' : ''}${this.to === i ? ' is-to' : ''}${targets.has(i) ? ' is-target' : ''}" data-t="${i}"
             ${clickable ? `tabindex="0" role="button" aria-label="${this.esc(n.name)}"` : ''}>
+            ${n.station ? `<rect class="t-station" x="${n.x - 29}" y="${n.y - 29}" width="58" height="58" rx="12"/>` : ''}
             <circle class="t-body" cx="${n.x}" cy="${n.y}" r="24" fill="${owner ? owner.color : '#d9d3c3'}"/>
             ${targets.has(i) ? `<circle class="t-ring" cx="${n.x}" cy="${n.y}" r="30"/>` : ''}
             ${this.from === i ? `<circle class="t-from" cx="${n.x}" cy="${n.y}" r="30"/>` : ''}
@@ -274,7 +322,7 @@
       if (this.from !== null && this.adj[this.from].includes(i) && i !== this.from) {
         this.to = i;
         this.choice = this.options()[0] || null;
-        this.count = Math.max(1, Math.min(this.avail(this.from), this.count));
+        this.count = Math.max(1, Math.min(this.cap(this.from, i), this.count));
       } else if (mine) {
         this.from = this.from === i ? null : i;
         this.to = null;
@@ -329,9 +377,11 @@
         picker = `<p class="kt-pick"><strong>${e(this.tname(this.from))}</strong>(出せる兵 ${this.avail(this.from)})から、隣の領地をタップ</p>`;
       } else if (this.from !== null && this.to !== null) {
         const opts = this.options();
-        const max = this.avail(this.from);
+        const max = this.cap(this.from, this.to);
+        const rail = this.isRail(this.from, this.to);
         picker = `
-          <p class="kt-pick"><strong>${e(this.tname(this.from))}</strong> → <strong>${e(this.tname(this.to))}</strong></p>
+          <p class="kt-pick"><strong>${e(this.tname(this.from))}</strong> ${rail ? '🚂' : '→'} <strong>${e(this.tname(this.to))}</strong></p>
+          ${rail ? `<p class="kt-note">鉄道で移動します。1回の命令で運べる兵は${v.map.railCap}までです。</p>` : ''}
           <div class="gk-opts">${opts.map((o, i) => `<button class="btn btn-small${this.choice && o.kind === this.choice.kind && o.side === this.choice.side ? ' btn-primary' : ''}" data-opt="${i}">${e(o.label)}</button>`).join('')}</div>
           ${this.choice?.kind === 'support' ? '<p class="kt-note">援軍は戦闘に加わって兵力を足し、終わると元の領地へ戻ります(その間、元の領地の守りは薄くなります)。</p>' : ''}
           <div class="gk-count">
@@ -345,8 +395,10 @@
       const list = this.orders.length
         ? `<ul class="gk-list">${this.orders.map((o, i) => {
             const own = v.terr[o.to].owner === my.id;
-            const what = o.kind === 'support' ? `${this.nation(o.side).title}に援軍` : own ? '移動' : '攻撃';
-            return `<li><span>${e(this.tname(o.from))} → ${e(this.tname(o.to))}</span><span class="gk-k gk-k-${o.kind === 'support' ? 'sup' : own ? 'move' : 'atk'}">${what} ${o.n}</span><button class="x" data-del="${i}" aria-label="取り消す">×</button></li>`;
+            const occ = !own && !v.terr[o.to].owner;
+            const what = o.kind === 'support' ? `${this.nation(o.side).title}に援軍` : own ? '移動' : occ ? '占領' : `${this.nation(v.terr[o.to].owner).title}を攻撃`;
+            const k = o.kind === 'support' ? 'sup' : own ? 'move' : occ ? 'occ' : 'atk';
+            return `<li><span>${e(this.tname(o.from))} ${this.isRail(o.from, o.to) ? '🚂' : '→'} ${e(this.tname(o.to))}</span><span class="gk-k gk-k-${k}">${e(what)} ${o.n}</span><button class="x" data-del="${i}" aria-label="取り消す">×</button></li>`;
           }).join('')}</ul>`
         : '<p class="kt-note">まだ命令はありません(何もしなければ全軍が守りにつきます)。</p>';
       const ready = v.nations.filter((n) => !n.cpu && n.connected);
@@ -368,11 +420,11 @@
       if (b.dataset.act === 'ready') return this.api.send('ready', { value: !v.me.ready });
       if (b.dataset.opt !== undefined) this.choice = this.options()[Number(b.dataset.opt)];
       if (b.dataset.cnt) {
-        const max = this.avail(this.from);
+        const max = this.cap(this.from, this.to);
         this.count = b.dataset.cnt === 'max' ? max : Math.max(1, Math.min(max, this.count + Number(b.dataset.cnt)));
       }
       if (b.dataset.act === 'add') {
-        const n = Math.min(this.count, this.avail(this.from));
+        const n = Math.min(this.count, this.cap(this.from, this.to));
         if (n > 0 && this.choice) {
           this.orders.push({ from: this.from, to: this.to, n, kind: this.choice.kind, side: this.choice.side });
           this.from = this.to = this.choice = null;
@@ -464,12 +516,17 @@
           const sides = b.sides
             .map((s) => `<span class="gk-side" style="--c:${s.nation ? this.nation(s.nation).color : '#9aa39e'}">${e(nm(s.nation))} ${s.own}${s.sup ? `+援${s.sup}` : ''}${s.bonus ? '+奇襲2' : ''}${s.nation ? ` 🎲${s.dice}` : ''} = ${s.strength}</span>`)
             .join(' vs ');
-          const res = b.result === 'taken' ? `${e(nm(b.winner))}が奪取` : b.result === 'held' ? `${e(nm(b.winner ?? b.owner))}が守った` : '押し返し合い';
+          const res =
+            b.result === 'taken'
+              ? `${e(nm(b.winner))}が${b.owner ? '奪取' : '占領'}`
+              : b.result === 'held'
+                ? b.owner ? `${e(nm(b.owner))}が守った` : '占領失敗(守備兵が残った)'
+                : '押し返し合い';
           return `<li><strong>${e(this.tname(b.node))}</strong>:${sides} → <em>${res}</em></li>`;
         })
         .join('');
       el.innerHTML = `
-        <h3 class="kb-sub">第${r.round}ラウンドの結果</h3>
+        <div class="gk-last-head"><h3 class="kb-sub">第${r.round}ラウンドの結果</h3><button class="btn btn-small" data-replay>動きをもう一度見る</button></div>
         ${battles ? `<ul class="gk-battles">${battles}</ul>` : '<p class="kt-note">戦闘はなかった</p>'}
         ${r.events.length ? `<ul class="gk-events">${r.events.map((x) => `<li>${e(x)}</li>`).join('')}</ul>` : ''}`;
     }

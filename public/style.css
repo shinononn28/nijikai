@@ -703,7 +703,6 @@ th:not(:first-child) { text-align: right; }
   .kt-map { max-height: max(360px, calc(100dvh - 250px)); }
 }
 .gk-map .fx-tok circle { stroke: #fff; stroke-width: 3; }
-.gk-map .fx-tok.is-sup circle { stroke-dasharray: 4 3; stroke: #15211d; }
 .gk-map .fx-tok text { font-size: 14px; font-weight: 700; fill: #fff; text-anchor: middle; }
 .gk-map .fx-tok.is-lost { opacity: 0.25; transition: opacity 0.3s; }
 .gk-map .fx-burst { fill: none; stroke: #c8323c; stroke-width: 4; }
@@ -720,3 +719,19 @@ th:not(:first-child) { text-align: right; }
 .view-dot { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--brass); }
 .view-dot[hidden], .chat-log[hidden], .chat-form[hidden] { display: none; }
 .sys-log .msg-system { font-size: 0.82rem; }
+
+.gk-map .fx-tok.fx-atk circle { stroke: #c8323c; stroke-width: 4; }
+.gk-map .fx-tok.fx-occ circle { stroke: #fff; stroke-dasharray: 3 3; }
+.gk-map .fx-tok.fx-sup circle { stroke-dasharray: 4 3; stroke: #15211d; }
+.gk-map .fx-burst.is-occ { stroke: #8a8577; stroke-dasharray: 6 5; stroke-width: 3; }
+.gk-map .fx-line { stroke-width: 4; stroke-linecap: round; opacity: 0.8; }
+.gk-map .fx-line.fx-occ, .gk-map .fx-line.fx-sup { stroke-dasharray: 6 6; }
+.gk-map .ord-occ { stroke-width: 4; stroke-linecap: round; stroke-dasharray: 2 8; pointer-events: none; }
+.gk-map .ord-atk { stroke-width: 6; }
+.gk-k-occ { border-color: var(--good); color: var(--good); border-style: dashed; }
+.gk-last-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+
+.gk-map .e-rail { fill: none; stroke: #5b4636; stroke-width: 7; stroke-linecap: round; opacity: 0.85; }
+.gk-map .e-rail-ties { fill: none; stroke: #f4efe2; stroke-width: 3; stroke-dasharray: 2 9; }
+.gk-map .t-station { fill: #efe6d8; stroke: #5b4636; stroke-width: 3; }
+.lg-rail { border-top: 5px solid #5b4636; }
