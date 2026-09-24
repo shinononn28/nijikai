@@ -111,7 +111,7 @@ class GaikouGame {
     while (this.nations.length < count) this.nations.push({ id: `n${this.nations.length + 1}`, owner: null, cpu: true });
     this.nations.forEach((n, i) => {
       n.color = COLORS[i];
-      n.title = `${names[i]}国`;
+      n.cpuTitle = `${names[i]}国`; // CPUの国の名前(人間の国はプレイヤー名)
       n.broken = 0;
       n.everTreaty = false;
       n.penalty = 0;
@@ -168,8 +168,12 @@ class GaikouGame {
   nationOf(pid) {
     return this.nations.find((n) => n.owner === pid) || null;
   }
+  // 国名:人間の国はプレイヤー名、CPUの国は生成した国名
+  nm(n) {
+    return n.owner ? this.ctx.nameOf(n.owner) : n.cpuTitle;
+  }
   label(n) {
-    return n.owner ? `${n.title}(${this.ctx.nameOf(n.owner)})` : `${n.title}(CPU)`;
+    return n.owner ? this.nm(n) : `${n.cpuTitle}(CPU)`;
   }
   terrName(id) {
     return this.map.nodes[id].name;
@@ -209,7 +213,7 @@ class GaikouGame {
       const kind = pick(kinds);
       if (kind === 'capital') {
         const target = pick(this.nations.filter((x) => x !== n));
-        n.objective = { kind, target: target.capital, text: `${target.title}の首都「${this.terrName(target.capital)}」を持っている` };
+        n.objective = { kind, target: target.capital, text: `${this.nm(target)}の首都「${this.terrName(target.capital)}」を持っている` };
       } else if (kind === 'region') {
         const r = pick(regions);
         n.objective = { kind, region: r, text: `大陸の${r}半分にある★を2つ以上持っている` };
@@ -258,7 +262,7 @@ class GaikouGame {
       const spot = lands.sort((a, b) => this.terr[a].troops - this.terr[b].troops)[0];
       if (spot === undefined) continue;
       this.terr[spot] = { owner: n.id, troops: 3 };
-      this.ctx.system(`${this.label(n)}が、${leader.title}の${this.terrName(spot)}で反乱軍として蜂起した!`);
+      this.ctx.system(`${this.label(n)}が、${this.nm(leader)}の${this.terrName(spot)}で反乱軍として蜂起した!`);
     }
   }
 
@@ -325,12 +329,12 @@ class GaikouGame {
         B.penalty += BETRAY_PENALTY;
         A.broken++;
         B.broken++;
-        events.push(`${A.title}と${B.title}が互いに条約を破った。共倒れで両国とも次の増援が${BETRAY_PENALTY}減る`);
+        events.push(`${this.nm(A)}と${this.nm(B)}が互いに条約を破った。共倒れで両国とも次の増援が${BETRAY_PENALTY}減る`);
       } else {
         const [atk, vic] = ab ? [A, B] : [B, A];
         atk.broken++;
         surprise.add(`${atk.id}|${vic.id}`);
-        events.push(`${atk.title}が${vic.title}との条約を破って奇襲した!(攻撃に+${SURPRISE})`);
+        events.push(`${this.nm(atk)}が${this.nm(vic)}との条約を破って奇襲した!(攻撃に+${SURPRISE})`);
       }
       brokenNow.push(t);
       this.cooldown[this.key(t.a, t.b)] = this.round + COOLDOWN;
@@ -338,6 +342,7 @@ class GaikouGame {
     this.treaties = this.treaties.filter((t) => !brokenNow.includes(t));
 
     // --- 兵の移動 ---
+    const prevTerr = this.terr.map((t) => ({ ...t }));
     const garrison = this.terr.map((t) => t.troops);
     const returning = []; // {to, owner, n}
     const attacks = {}; // 領地 → {国: 兵}
@@ -431,10 +436,11 @@ class GaikouGame {
     const taken = battles.filter((b) => b.result === 'taken');
     for (const b of taken) {
       const w = this.nation(b.winner);
-      events.push(`${w.title}が${this.terrName(b.node)}${b.owner ? `を${this.nation(b.owner).title}から奪った` : 'を占領した'}`);
+      events.push(`${this.nm(w)}が${this.terrName(b.node)}${b.owner ? `を${this.nm(this.nation(b.owner))}から奪った` : 'を占領した'}`);
     }
-    if (Object.keys(dividend).length) events.push(`平和配当:${Object.entries(dividend).map(([id, d]) => `${this.nation(id).title}+${d}`).join('、')}`);
-    this.lastResult = { round: this.round, battles, events, orders: this.orders };
+    if (Object.keys(dividend).length) events.push(`平和配当:${Object.entries(dividend).map(([id, d]) => `${this.nm(this.nation(id))}+${d}`).join('、')}`);
+    const moves = Object.entries(this.orders).flatMap(([nid, list]) => list.map((o) => ({ ...o, nation: nid })));
+    this.lastResult = { round: this.round, battles, events, moves, prevTerr };
     this.history.push({ round: this.round, events });
     for (const e of events) this.ctx.system(e);
     for (const n of this.nations) if (this.owned(n.id).length === 0) this.ctx.system(`${this.label(n)}は領地をすべて失った。次のラウンドに反乱軍として再起する`);
@@ -475,7 +481,7 @@ class GaikouGame {
     if (back) return this.sign(to, from);
     if (this.proposals.some((p) => p.from === from.id && p.to === to.id)) return;
     this.proposals.push({ from: from.id, to: to.id });
-    this.ctx.system(`${from.title}が${to.title}に不可侵条約を申し込んだ`);
+    this.ctx.system(`${this.nm(from)}が${this.nm(to)}に不可侵条約を申し込んだ`);
     if (to.cpu) this.later(rint(1500, 4000), () => this.cpuAnswer(to, from));
   }
 
@@ -485,13 +491,13 @@ class GaikouGame {
     this.treaties.push({ a: proposer.id, b: accepter.id, since: this.round });
     proposer.everTreaty = true;
     accepter.everTreaty = true;
-    this.ctx.system(`${proposer.title}と${accepter.title}が不可侵条約を結んだ`);
+    this.ctx.system(`${this.nm(proposer)}と${this.nm(accepter)}が不可侵条約を結んだ`);
   }
 
   decline(decliner, proposer) {
     const before = this.proposals.length;
     this.proposals = this.proposals.filter((p) => !(p.from === proposer.id && p.to === decliner.id));
-    if (this.proposals.length !== before) this.ctx.system(`${decliner.title}は${proposer.title}の申し込みを断った`);
+    if (this.proposals.length !== before) this.ctx.system(`${this.nm(decliner)}は${this.nm(proposer)}の申し込みを断った`);
   }
 
   // ---------- CPU ----------
@@ -615,9 +621,10 @@ class GaikouGame {
   onLeave(id) {
     const n = this.nationOf(id);
     if (!n) return;
+    n.cpuTitle = `${this.ctx.nameOf(id)}(CPU代行)`;
     n.owner = null;
     n.cpu = true;
-    this.ctx.system(`${n.title}の指導者が去ったので、CPUが国を引き継ぎます`);
+    this.ctx.system(`${this.ctx.nameOf(id)}が去ったので、CPUが国を引き継ぎます`);
     this.checkAllReady();
   }
 
@@ -641,7 +648,7 @@ class GaikouGame {
       winStars: this.winStars,
       nations: this.nations.map((n) => ({
         id: n.id,
-        title: n.title,
+        title: this.nm(n),
         leader: n.owner ? this.ctx.nameOf(n.owner) : 'CPU',
         cpu: n.cpu,
         color: n.color,
@@ -667,7 +674,7 @@ class GaikouGame {
           }
         : null,
       lastResult: this.lastResult
-        ? { round: this.lastResult.round, battles: this.lastResult.battles, events: this.lastResult.events }
+        ? this.lastResult
         : null,
       result: ended ? { kind: this.endKind, winners: this.winners } : null,
       objectivesOn: !!this.s.objectives,

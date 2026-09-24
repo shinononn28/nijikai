@@ -1,7 +1,10 @@
 (() => {
   'use strict';
 
-  const kindLabel = { move: '移動・攻撃', support: '援軍' };
+  // 解決の演出のタイミング(ミリ秒)
+  const FX = { TRAVEL: 1100, BATTLE: 900, BACK: 600, FLASH: 900 };
+  FX.SWAP = FX.TRAVEL + FX.BATTLE;
+  FX.TOTAL = FX.SWAP + Math.max(FX.BACK, FX.FLASH) + 200;
 
   class GaikouClient {
     constructor(root, api) {
@@ -19,6 +22,7 @@
 
     destroy() {
       clearTimeout(this.sendTimer);
+      cancelAnimationFrame(this.raf);
     }
 
     update(v) {
@@ -31,7 +35,98 @@
         this.orders = v.me ? v.me.orders.map((o) => ({ ...o })) : [];
         this.build(v);
       }
+      // ラウンドが解決したら、全員の兵の動きを地図の上で再生する
+      const r = v.lastResult;
+      if (r && this.animRound !== r.round && (r.round === v.round - 1 || v.phase === 'ended')) {
+        this.animRound = r.round;
+        this.startAnim(r);
+      }
       this.refresh(v);
+    }
+
+    // ---------- 解決の演出 ----------
+    startAnim(r) {
+      cancelAnimationFrame(this.raf);
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        this.anim = { r, t0: performance.now() - FX.SWAP, reduced: true };
+      } else {
+        this.anim = { r, t0: performance.now() };
+      }
+      this.swapped = false;
+      const loop = () => {
+        if (!this.anim) return;
+        const t = performance.now() - this.anim.t0;
+        if (t >= FX.TOTAL) return this.endAnim();
+        if (!this.swapped && t >= FX.SWAP) {
+          this.swapped = true;
+          this.renderMap(this.v);
+        }
+        this.drawFx(t);
+        this.raf = requestAnimationFrame(loop);
+      };
+      this.raf = requestAnimationFrame(loop);
+    }
+
+    endAnim() {
+      cancelAnimationFrame(this.raf);
+      this.anim = null;
+      if (this.v) this.renderMap(this.v);
+    }
+
+    drawFx(t) {
+      const fx = this.root.querySelector('#gk-fx');
+      if (!fx || !this.anim) return;
+      const v = this.v;
+      const r = this.anim.r;
+      const N = v.map.nodes;
+      const color = (id) => (id ? this.nation(id)?.color : '#9aa39e') || '#9aa39e';
+      const ease = (x) => (x < 0 ? 0 : x > 1 ? 1 : 1 - Math.pow(1 - x, 3));
+      const out = [];
+      const battleAt = new Map(r.battles.map((b) => [b.node, b]));
+
+      // 兵のコマ:行って(援軍と押し返された攻撃は)帰ってくる
+      for (const m of this.anim.reduced ? [] : r.moves) {
+        const a = N[m.from];
+        const b = N[m.to];
+        const b0 = battleAt.get(m.to);
+        const goesBack = m.kind === 'support' || (b0 && b0.result === 'bounce');
+        const reach = m.kind === 'support' ? 0.6 : 0.8;
+        let k;
+        if (t < FX.TRAVEL) k = ease(t / FX.TRAVEL) * reach;
+        else if (t < FX.SWAP) k = reach;
+        else if (goesBack && t < FX.SWAP + FX.BACK) k = reach * (1 - ease((t - FX.SWAP) / FX.BACK));
+        else continue; // 到着して合流したか、戦いで散った
+        const lost = b0 && t >= FX.TRAVEL + FX.BATTLE * 0.5 && !goesBack && b0.winner !== m.nation;
+        const x = a.x + (b.x - a.x) * k;
+        const y = a.y + (b.y - a.y) * k;
+        out.push(`<g class="fx-tok${m.kind === 'support' ? ' is-sup' : ''}${lost ? ' is-lost' : ''}"><circle cx="${x}" cy="${y}" r="14" fill="${color(m.nation)}"/><text x="${x}" y="${y + 5}">${m.n}</text></g>`);
+      }
+
+      // 戦闘:広がる輪と結果
+      if (t >= FX.TRAVEL * 0.85 && t < FX.SWAP + FX.FLASH) {
+        const p = Math.min(1, (t - FX.TRAVEL * 0.85) / FX.BATTLE);
+        for (const b of r.battles) {
+          const n = N[b.node];
+          const rad = 26 + p * 22;
+          out.push(`<circle class="fx-burst" cx="${n.x}" cy="${n.y}" r="${rad}" style="opacity:${1 - p * 0.7}"/>`);
+          if (t >= FX.TRAVEL + FX.BATTLE * 0.4) {
+            const txt = b.result === 'taken' ? '陥落' : b.result === 'held' ? '防衛' : '押し返し';
+            out.push(`<text class="fx-result" x="${n.x}" y="${n.y - 34}" fill="${b.result === 'taken' ? color(b.winner) : '#15211d'}">${txt}</text>`);
+          }
+        }
+      }
+
+      // 持ち主が変わった領地を光らせる
+      if (t >= FX.SWAP) {
+        const p = Math.min(1, (t - FX.SWAP) / FX.FLASH);
+        v.terr.forEach((tt, i) => {
+          if (r.prevTerr[i]?.owner === tt.owner || !tt.owner) return;
+          out.push(`<circle class="fx-flash" cx="${N[i].x}" cy="${N[i].y}" r="${26 + p * 14}" stroke="${color(tt.owner)}" style="opacity:${1 - p}"/>`);
+        });
+      }
+
+      out.push(`<g class="fx-banner"><rect x="${v.map.width / 2 - 110}" y="6" width="220" height="30" rx="15"/><text x="${v.map.width / 2}" y="27">第${r.round}ラウンドの結果(タップで飛ばす)</text></g>`);
+      fx.innerHTML = out.join('');
     }
 
     buildAdj(v) {
@@ -89,7 +184,7 @@
         const g = el.closest('[data-t]');
         if (g) this.pick(Number(g.dataset.t));
       };
-      svg.addEventListener('click', (e) => choose(e.target));
+      svg.addEventListener('click', (e) => (this.anim ? this.endAnim() : choose(e.target)));
       svg.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -116,6 +211,8 @@
     renderMap(v) {
       const svg = this.root.querySelector('#gk-map');
       const N = v.map.nodes;
+      const animating = this.anim && performance.now() - this.anim.t0 < FX.SWAP;
+      const terrNow = animating ? this.anim.r.prevTerr : v.terr;
       const parts = [
         `<defs>${v.nations.map((n) => `<marker id="ar-${n.id}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${n.color}"/></marker>`).join('')}
           <marker id="ar-move" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#15211d"/></marker></defs>`,
@@ -145,7 +242,7 @@
 
       const targets = new Set(this.from !== null ? this.adj[this.from] : []);
       N.forEach((n, i) => {
-        const t = v.terr[i];
+        const t = terrNow[i];
         const owner = t.owner ? this.nation(t.owner) : null;
         const mine = owner && owner.id === my?.id;
         const isCap = owner && v.nations.some((x) => x.capital === i);
@@ -165,14 +262,8 @@
         void isCap;
       });
 
-      // 前のラウンドで戦闘があった場所
-      if (v.lastResult && v.lastResult.round === v.round - 1) {
-        for (const b of v.lastResult.battles) {
-          const n = N[b.node];
-          parts.push(`<text class="t-boom" x="${n.x - 26}" y="${n.y + 30}">⚔</text>`);
-        }
-      }
-      svg.innerHTML = parts.join('') + arrows.join('');
+      svg.innerHTML = parts.join('') + (animating ? '' : arrows.join('')) + '<g id="gk-fx"></g>';
+      if (this.anim) this.drawFx(performance.now() - this.anim.t0);
     }
 
     pick(i) {
@@ -223,7 +314,7 @@
           <p class="kt-result-sub">${r.kind === 'instant' ? `★を${v.winStars}つ押さえて即勝利` : '全ラウンド終了。★+秘密の目標で決着'}</p>
           <table class="gk-table">
             <thead><tr><th>国</th><th>★</th><th>目標</th><th>点</th></tr></thead>
-            <tbody>${rows.map((n) => `<tr class="${r.winners.includes(n.id) ? 'is-win' : ''}"><td><i class="dot" style="background:${n.color}"></i>${e(n.title)}<small>${e(n.leader)}</small></td><td class="num">${n.stars}</td>
+            <tbody>${rows.map((n) => `<tr class="${r.winners.includes(n.id) ? 'is-win' : ''}"><td><i class="dot" style="background:${n.color}"></i>${e(n.title)}${n.cpu ? '<small>CPU</small>' : ''}</td><td class="num">${n.stars}</td>
               <td>${n.objective ? `<span class="${n.objective.done ? 'ok' : 'ng'}">${n.objective.done ? '達成' : '未達'}</span><small>${e(n.objective.text)}</small>` : '—'}</td><td class="num">${n.score}</td></tr>`).join('')}</tbody>
           </table>
           ${this.api.isHost() ? '<button class="btn btn-primary btn-block" data-act="finish">ロビーに戻る</button>' : '<p class="hint wait">ホストがロビーに戻すのを待っています</p>'}`;
@@ -351,7 +442,7 @@
       el.innerHTML = `
         <h3 class="kb-sub">国の様子(★${v.winStars}つで即勝利)</h3>
         <ul class="kt-team">${v.nations.map((n) => `
-          <li><i class="dot" style="background:${n.color}"></i><span class="player-name">${e(n.title)}<small class="gk-leader">${e(n.leader)}</small></span>
+          <li><i class="dot" style="background:${n.color}"></i><span class="player-name">${e(n.title)}${n.cpu ? '<small class="gk-leader">CPU</small>' : ''}</span>
             <span class="kt-tickets">★${n.stars}・領地${n.lands}・兵${n.troops}${n.broken ? `・破約${n.broken}` : ''}</span>
             ${v.phase === 'orders' ? (n.ready ? '<span class="tag tag-done">確定</span>' : '<span class="tag">考え中</span>') : ''}</li>`).join('')}</ul>
         ${v.objectivesOn && v.me?.objective && v.phase !== 'ended' ? `<div class="gk-obj"><strong>あなたの秘密の目標(+2点)</strong><p>${e(v.me.objective.text)}</p><small>${v.me.objective.done ? '今は達成しています' : '今は未達成'}</small></div>` : ''}

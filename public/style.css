@@ -702,3 +702,21 @@ th:not(:first-child) { text-align: right; }
 @media (min-width: 761px) {
   .kt-map { max-height: max(360px, calc(100dvh - 250px)); }
 }
+.gk-map .fx-tok circle { stroke: #fff; stroke-width: 3; }
+.gk-map .fx-tok.is-sup circle { stroke-dasharray: 4 3; stroke: #15211d; }
+.gk-map .fx-tok text { font-size: 14px; font-weight: 700; fill: #fff; text-anchor: middle; }
+.gk-map .fx-tok.is-lost { opacity: 0.25; transition: opacity 0.3s; }
+.gk-map .fx-burst { fill: none; stroke: #c8323c; stroke-width: 4; }
+.gk-map .fx-result { font-size: 18px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: #f4efe2; stroke-width: 5px; }
+.gk-map .fx-flash { fill: none; stroke-width: 6; }
+.gk-map .fx-banner rect { fill: rgba(21, 33, 29, 0.82); }
+.gk-map .fx-banner text { fill: #fff; font-size: 13px; font-weight: 700; text-anchor: middle; }
+.gk-map #gk-fx { pointer-events: none; }
+
+/* チャット欄の「チャット / ログ」切り替え */
+.chat-views { display: flex; gap: 0.3rem; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); background: var(--card); }
+.chat-views button { position: relative; border: 2px solid var(--line); background: #fff; border-radius: 999px; padding: 0.15rem 0.9rem; font-weight: 700; cursor: pointer; font-size: 0.85rem; }
+.chat-views button.is-on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.view-dot { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--brass); }
+.view-dot[hidden], .chat-log[hidden], .chat-form[hidden] { display: none; }
+.sys-log .msg-system { font-size: 0.82rem; }

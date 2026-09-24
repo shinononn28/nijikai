@@ -41,6 +41,7 @@
     unread: 0,
     notice: '',
     channels: [{ id: 'all', label: '全体' }],
+    chatView: 'talk',
     sendChannel: 'all',
   };
   let game = null; // { id, instance }
@@ -162,6 +163,7 @@
     state.screen = 'room';
     state.tab = 'game';
     state.unread = 0;
+    state.chatView = 'talk';
     app.innerHTML = `
       <div class="room" data-tab="game">
         <header class="topbar">
@@ -176,7 +178,12 @@
         <div class="room-body">
           <section class="main" id="main" aria-live="polite"></section>
           <aside class="chat" id="chat" aria-label="チャット">
+            <div class="chat-views" role="tablist">
+              <button type="button" data-view="talk" class="is-on" role="tab">チャット</button>
+              <button type="button" data-view="log" role="tab">ログ<span class="view-dot" id="log-dot" hidden></span></button>
+            </div>
             <ol class="chat-log" id="chat-log"></ol>
+            <ol class="chat-log sys-log" id="sys-log" hidden></ol>
             <div class="chat-channels" id="chat-channels" hidden></div>
             <div class="chat-form">
               <input id="chat-input" maxlength="300" placeholder="メッセージを送る" autocomplete="off">
@@ -216,10 +223,27 @@
       b.onclick = () => setTab(b.dataset.tab);
     });
 
+    $('.chat-views').onclick = (ev) => {
+      const b = ev.target.closest('[data-view]');
+      if (b) setChatView(b.dataset.view);
+    };
     renderChatLog();
     renderChannels();
     renderTopbar();
     renderMain();
+  }
+
+  // チャット欄は「チャット(発言)」と「ログ(入退室やゲームの進行)」に分ける
+  function setChatView(view) {
+    state.chatView = view;
+    document.querySelectorAll('.chat-views [data-view]').forEach((b) => b.classList.toggle('is-on', b.dataset.view === view));
+    $('#chat-log').hidden = view !== 'talk';
+    $('#sys-log').hidden = view !== 'log';
+    $('.chat-form').hidden = view !== 'talk';
+    const ch = $('#chat-channels');
+    if (ch) ch.hidden = view !== 'talk' || state.channels.length < 2;
+    if (view === 'log') $('#log-dot').hidden = true;
+    scrollChat(true);
   }
 
   // ゲームによっては「作戦」などのチーム用チャンネルが増える
@@ -227,7 +251,7 @@
     const el = $('#chat-channels');
     if (!el) return;
     if (!state.channels.some((c) => c.id === state.sendChannel)) state.sendChannel = 'all';
-    el.hidden = state.channels.length < 2;
+    el.hidden = state.channels.length < 2 || state.chatView === 'log';
     el.innerHTML = `<span>送信先</span>${state.channels
       .map((c) => `<button type="button" class="ch-btn ch-${esc(c.id.split(':')[0])}${c.id === state.sendChannel ? ' is-on' : ''}" data-ch="${esc(c.id)}">${esc(c.label)}</button>`)
       .join('')}`;
@@ -308,31 +332,40 @@
   function nearBottom(el) {
     return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
+  const isLog = (m) => m.type === 'system';
   function scrollChat(force = false) {
-    const log = $('#chat-log');
-    if (log && (force || log.dataset.stick === '1')) log.scrollTop = log.scrollHeight;
+    for (const log of [$('#chat-log'), $('#sys-log')]) {
+      if (log && (force || log.dataset.stick === '1')) log.scrollTop = log.scrollHeight;
+    }
   }
 
   function renderChatLog() {
-    const log = $('#chat-log');
-    if (!log) return;
-    log.innerHTML = state.chat.length
-      ? state.chat.map(chatItem).join('')
-      : '<li class="msg msg-system"><span>ここがチャット欄です。待っているあいだも話せます。</span></li>';
-    log.dataset.stick = '1';
-    log.onscroll = () => { log.dataset.stick = nearBottom(log) ? '1' : '0'; };
+    const talk = $('#chat-log');
+    const sys = $('#sys-log');
+    if (!talk || !sys) return;
+    const talks = state.chat.filter((m) => !isLog(m));
+    const logs = state.chat.filter(isLog);
+    talk.innerHTML = talks.length
+      ? talks.map(chatItem).join('')
+      : '<li class="msg msg-system"><span>ここがチャット欄です。待っているあいだも話せます。入退室やゲームの進行は「ログ」にあります。</span></li>';
+    sys.innerHTML = logs.map(chatItem).join('');
+    for (const log of [talk, sys]) {
+      log.dataset.stick = '1';
+      log.onscroll = () => { log.dataset.stick = nearBottom(log) ? '1' : '0'; };
+    }
     scrollChat(true);
   }
 
   function appendChat(m) {
     state.chat.push(m);
     if (state.chat.length > 300) state.chat.shift();
-    const log = $('#chat-log');
+    const log = isLog(m) ? $('#sys-log') : $('#chat-log');
     if (!log) return;
-    if (state.chat.length === 1) return renderChatLog();
+    if (!isLog(m) && state.chat.filter((x) => !isLog(x)).length === 1) return renderChatLog();
     log.insertAdjacentHTML('beforeend', chatItem(m));
     while (log.children.length > 300) log.firstElementChild.remove();
     scrollChat(m.playerId === clientId);
+    if (isLog(m) && state.chatView === 'talk') $('#log-dot').hidden = false;
     const mobile = matchMedia('(max-width: 760px)').matches;
     if (mobile && state.tab !== 'chat' && m.type !== 'system' && m.playerId !== clientId) {
       state.unread++;
