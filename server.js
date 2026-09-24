@@ -14,7 +14,10 @@ const ROOM_IDLE_MS = 30 * 60 * 1000; // 誰もいない部屋を消す
 const DEV_MIN_PLAYERS = Number(process.env.DEV_MIN_PLAYERS) || null;
 
 const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
+// デプロイのたびに変わる番号。ゲーム画面のファイルを読み込むときに付けて、古いキャッシュを使わないようにする
+const BUILD = Date.now().toString(36);
+// 毎回サーバーに更新がないか確かめさせる(push後に古い画面が残らないように)
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 app.get('/healthz', (_req, res) => res.send('ok'));
 
 const server = http.createServer(app);
@@ -49,6 +52,7 @@ const publicCatalog = () =>
     maxPlayers: g.maxPlayers,
     cpu: !!g.cpu,
     comingSoon: !!g.comingSoon,
+    client: g.comingSoon ? [] : g.client || [`${g.id}.js`], // public/games/ の画面ファイル(この順に読み込む)
     settings: g.settings || [],
   }));
 
@@ -122,6 +126,7 @@ function roomState(room) {
     selectedGame: room.selectedGame,
     settings: room.settings,
     catalog: publicCatalog(),
+    build: BUILD,
     playing: !!room.game,
     playingGameId: room.gameId,
   };

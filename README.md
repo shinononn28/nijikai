@@ -82,4 +82,4 @@ public/style.css       見た目
    - 全体チャットの発言をゲームで使うなら `onPublicChat(playerId, text)`
    - チーム用チャンネルを作るなら `chatChannels(playerId)` / `chatChannel(playerId, channel)` / `onChat(playerId, channel, text)` を実装する(怪盗と探偵が例)
 2. `games/index.js` の `catalog` に登録します(`settings` を書くとロビーに設定欄が自動で出ます)。
-3. `public/games/` に画面を作り、`window.GameClients[ゲームID] = { create(root, api) }` で登録して、`index.html` に `<script>` を足します。
+3. `public/games/<ゲームID>.js` に画面を作り、`window.GameClients[ゲームID] = { create(root, api) }` で登録します。画面ファイルは遊ぶときに自動で読み込まれるので、`index.html` を触る必要はありません(複数ファイルが要るときは、`games/` の定義に `client: ['a.js', 'b.js']` を書く)。

@@ -123,6 +123,7 @@ module.exports = {
   minPlayers: 1,
   maxPlayers: 6,
   cpu: true, // CPUの数は「卓の人数」で決まる
+  client: ['nimaijita-engine.js', 'nimaijita.js'], // エンジンを先に読み込む
   settings: [
     { key: 'n', label: '卓の人数', default: 5, options: [4, 5, 6].map((n) => ({ value: n, label: `${n}人(足りない分はCPU)` })) },
     {

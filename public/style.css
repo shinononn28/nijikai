@@ -697,3 +697,8 @@ th:not(:first-child) { text-align: right; }
 .gk-table .ok { color: var(--good); font-weight: 700; }
 .gk-table .ng { color: var(--muted); }
 .kb-phase .dot { margin-right: 0.35rem; vertical-align: -0.1em; }
+
+/* PCでは縦長の地図が画面に収まるように高さを抑える(スマホは縦スクロールのまま) */
+@media (min-width: 761px) {
+  .kt-map { max-height: max(360px, calc(100dvh - 250px)); }
+}

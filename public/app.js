@@ -354,7 +354,11 @@
       const client = window.GameClients?.[v.gameId];
       if (!client) {
         destroyGame();
-        main.innerHTML = '<p class="empty">このゲームの画面がまだありません。</p>';
+        main.innerHTML = '<p class="empty">ゲーム画面を読み込んでいます…</p>';
+        loadGameClient(v.gameId).then((err) => {
+          if (!err) return renderMain();
+          if (state.view?.gameId === v.gameId) main.innerHTML = `<p class="empty">${esc(err)}</p>`;
+        });
         return;
       }
       if (!game || game.id !== v.gameId) {
@@ -371,6 +375,38 @@
     }
     destroyGame();
     renderLobby(main);
+  }
+
+  // ゲームの画面ファイルを必要になったときに読み込む(失敗したら理由を返す)
+  const loading = {};
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = src;
+      el.onload = resolve;
+      el.onerror = () => reject(new Error(src));
+      document.head.appendChild(el);
+    });
+  }
+  function loadGameClient(id) {
+    if (!loading[id]) {
+      const files = state.room?.catalog.find((g) => g.id === id)?.client || [`${id}.js`];
+      const ver = state.room?.build || Date.now();
+      loading[id] = (async () => {
+        try {
+          for (const f of files) await loadScript(`/games/${f}?v=${ver}`);
+        } catch (e) {
+          delete loading[id];
+          return `ゲーム画面のファイル(${e.message.split('?')[0]})を読み込めませんでした。リポジトリの public/games/ にファイルがあるか確認してください。`;
+        }
+        if (!window.GameClients?.[id]) {
+          delete loading[id];
+          return 'ゲーム画面のファイルは読み込めましたが、中でエラーが起きました。ブラウザの開発者ツールのコンソールを確認してください。';
+        }
+        return null;
+      })();
+    }
+    return loading[id];
   }
 
   const gameApi = {
