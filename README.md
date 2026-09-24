@@ -10,7 +10,11 @@ TRPGの二次会で遊べる、チャット付きのブラウザパーティゲ�
   - イベントは固定の山札(平穏2・隕石2・補給船・太陽嵐・夜間作業・節電命令・全数調査・通信障害)から毎日1枚、翌日の予報つき。
   - タンクの初期量は「人数×日数」、生産は毎日「人数〜人数×2」。全員の平均使用量が2なら7割ほど生き残る調整です。
   - 退室した人の席はCPUが引き継ぎます。
-- 忘れた単語・怪盗と探偵は「準備中」としてゲーム選択画面に並んでいます。
+- **怪盗と探偵**(1〜6人、足りない探偵はCPU):毎回自動生成される街で、怪盗と探偵が同時に移動先を決める追跡ゲーム。怪盗は12ターン以内にお宝を3つ盗めば勝ち、探偵は同じマスに入るか同じ道ですれ違えば確保。
+  - 怪盗の移動手段は毎ターン、位置は3・6・9ターン目とお宝を盗んだときに公開。怪盗には変装(移動手段を隠す)×2と高飛び(2回移動)×1、探偵はバス4回・地下鉄2回まで。
+  - 探偵だけの「作戦」チャットがあり、発言は設定した確率で伏せ字まじりに怪盗へ漏れる(盗聴)。作戦チャットには本物の目撃通報が届き、怪盗は同じ見た目の偽の通報を3回まで送れる。
+  - 怪盗をCPUにすれば、全員で協力して追いかける遊び方もできる。
+- 忘れた単語は「準備中」としてゲーム選択画面に並んでいます。
 
 ## ローカルで動かす
 
@@ -44,9 +48,12 @@ games/index.js         ゲーム一覧。新しいゲームはここに登録す
 games/kaburi.js        被り列挙クイズのルール(サーバー側)
 games/kaburi-topics.js お題の素材(カテゴリ・頭文字)。行を足すとお題が増える
 games/moon.js          月面基地の酸素のルールとCPU(数値の調整は冒頭の EVENTS / DECK と MoonGame)
+games/kaito.js         怪盗と探偵のルールとCPU(公開ターンやチケット数は冒頭の定数)
+games/kaito-map.js     怪盗と探偵の街の自動生成
 public/app.js          画面の土台(ホーム・ロビー・チャット)
 public/games/kaburi.js 被り列挙クイズの画面
 public/games/moon.js   月面基地の酸素の画面
+public/games/kaito.js  怪盗と探偵の画面(地図はSVG)
 public/style.css       見た目
 ```
 
@@ -57,5 +64,7 @@ public/style.css       見た目
    - `view(playerId)` そのプレイヤーに見せる情報(手札など非公開情報はここで出し分ける)
    - `onJoin(id)` / `onLeave(id)` / `onConnectionChange()` / `dispose()`
    - 状態が変わったら `ctx.update()`、チャットへのお知らせは `ctx.system(text)`、終わったら `ctx.finish()`
+   - 特定の人にだけ届けるメッセージは `ctx.post(msg, readers)`、CPUの発言は `ctx.say(id, name, text)`
+   - チーム用チャンネルを作るなら `chatChannels(playerId)` / `chatChannel(playerId, channel)` / `onChat(playerId, channel, text)` を実装する(怪盗と探偵が例)
 2. `games/index.js` の `catalog` に登録します(`settings` を書くとロビーに設定欄が自動で出ます)。
 3. `public/games/` に画面を作り、`window.GameClients[ゲームID] = { create(root, api) }` で登録して、`index.html` に `<script>` を足します。

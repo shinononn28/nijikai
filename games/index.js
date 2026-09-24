@@ -3,6 +3,7 @@
 // 返すオブジェクトに action / view / onJoin / onLeave / onConnectionChange / dispose を実装する。
 const kaburi = require('./kaburi');
 const moon = require('./moon');
+const kaito = require('./kaito');
 
 const catalog = [
   kaburi,
@@ -15,15 +16,7 @@ const catalog = [
     comingSoon: true,
   },
   moon,
-  {
-    id: 'kaito',
-    name: '怪盗と探偵',
-    tagline: '街を逃げ回る怪盗を、探偵たちが包囲する。',
-    minPlayers: 3,
-    maxPlayers: 6,
-    cpu: true,
-    comingSoon: true,
-  },
+  kaito,
 ];
 
 const getGame = (id) => catalog.find((g) => g.id === id) || null;

@@ -14,7 +14,49 @@
       this.historyOpen = true;
     }
 
-    destroy() {}
+    destroy() {
+      this.closeModal();
+    }
+
+    // ---------- その日のイベントを知らせるモーダル(1日1回) ----------
+    showEventModal(v) {
+      const e = this.esc;
+      this.closeModal();
+      this.modalDay = v.day;
+      const wrap = document.createElement('div');
+      wrap.className = 'mn-modal';
+      wrap.innerHTML = `
+        <div class="mn-modal-card" role="dialog" aria-modal="true" aria-labelledby="mn-modal-title">
+          <div class="mn-modal-head">
+            <span>${v.day}日目 / ${v.days}日</span>
+            <span class="timer" data-ends-at="${v.endsAt}"></span>
+          </div>
+          <span class="event-label">今日のイベント</span>
+          <h2 class="mn-modal-title" id="mn-modal-title">${e(v.event.name)}</h2>
+          <p class="mn-modal-text">${e(v.event.text)}</p>
+          ${v.me?.isolated ? '<p class="mn-modal-alert">あなたは今日、隔離室にいます。使用量1で固定・得点なしです。</p>' : ''}
+          <div class="mn-modal-facts">
+            <span>酸素タンク <strong>${v.tank < 0 ? `−${-v.tank}` : v.tank}</strong></span>
+            <span>${v.forecast ? `明日の予報 <strong>${e(v.forecast.name)}</strong>` : '<strong>今日が最終日</strong>'}</span>
+          </div>
+          <button class="btn btn-primary btn-block" data-close>行動を決める</button>
+        </div>`;
+      wrap.addEventListener('click', (ev) => {
+        if (ev.target === wrap || ev.target.closest('[data-close]')) this.closeModal();
+      });
+      this.onKey = (ev) => { if (ev.key === 'Escape') this.closeModal(); };
+      document.addEventListener('keydown', this.onKey);
+      document.body.appendChild(wrap);
+      this.modal = wrap;
+      wrap.querySelector('[data-close]').focus();
+    }
+
+    closeModal() {
+      if (this.onKey) document.removeEventListener('keydown', this.onKey);
+      this.onKey = null;
+      this.modal?.remove();
+      this.modal = null;
+    }
 
     update(v) {
       this.v = v;
@@ -55,6 +97,8 @@
       this.root.querySelector('#mn-history').addEventListener('toggle', (e) => { this.historyOpen = e.target.open; });
 
       const area = this.root.querySelector('#mn-phase');
+      if (v.phase !== 'action') this.closeModal();
+      else if (this.modalDay !== v.day && v.event) this.showEventModal(v);
       if (v.phase === 'action') this.buildAction(area, v);
       if (v.phase === 'meeting') this.buildMeeting(area, v);
       if (v.phase === 'ended') this.buildEnded(area, v);

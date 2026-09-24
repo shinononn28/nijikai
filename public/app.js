@@ -40,6 +40,8 @@
     tab: 'game',
     unread: 0,
     notice: '',
+    channels: [{ id: 'all', label: '全体' }],
+    sendChannel: 'all',
   };
   let game = null; // { id, instance }
 
@@ -174,6 +176,7 @@
           <section class="main" id="main" aria-live="polite"></section>
           <aside class="chat" id="chat" aria-label="チャット">
             <ol class="chat-log" id="chat-log"></ol>
+            <div class="chat-channels" id="chat-channels" hidden></div>
             <div class="chat-form">
               <input id="chat-input" maxlength="300" placeholder="メッセージを送る" autocomplete="off">
               <button class="btn btn-primary" id="chat-send">送信</button>
@@ -202,7 +205,7 @@
       const text = input.value.trim();
       if (!text) return;
       input.value = '';
-      const res = await send('chat:send', { text });
+      const res = await send('chat:send', { text, channel: state.sendChannel });
       if (!res.ok && !input.value) input.value = text;
     };
     onEnter(input, submit);
@@ -213,8 +216,33 @@
     });
 
     renderChatLog();
+    renderChannels();
     renderTopbar();
     renderMain();
+  }
+
+  // ゲームによっては「作戦」などのチーム用チャンネルが増える
+  function renderChannels() {
+    const el = $('#chat-channels');
+    if (!el) return;
+    if (!state.channels.some((c) => c.id === state.sendChannel)) state.sendChannel = 'all';
+    el.hidden = state.channels.length < 2;
+    el.innerHTML = `<span>送信先</span>${state.channels
+      .map((c) => `<button type="button" class="ch-btn ch-${esc(c.id)}${c.id === state.sendChannel ? ' is-on' : ''}" data-ch="${esc(c.id)}">${esc(c.label)}</button>`)
+      .join('')}`;
+    el.onclick = (ev) => {
+      const b = ev.target.closest('[data-ch]');
+      if (!b) return;
+      state.sendChannel = b.dataset.ch;
+      renderChannels();
+      $('#chat-input')?.focus();
+    };
+    const input = $('#chat-input');
+    if (input) {
+      const label = state.channels.find((c) => c.id === state.sendChannel)?.label;
+      input.placeholder = state.sendChannel === 'all' ? 'メッセージを送る' : `${label}に送る(チームだけに見える)`;
+      input.classList.toggle('is-team', state.sendChannel !== 'all');
+    }
   }
 
   function setTab(tab) {
@@ -263,10 +291,15 @@
 
   function chatItem(m) {
     if (m.type === 'system') return `<li class="msg msg-system"><span>${esc(m.text)}</span></li>`;
+    const ch = m.channel && m.channel !== 'all' ? ` msg-ch msg-ch-${esc(m.channel)}` : '';
+    const chTag = ch ? `<span class="tag tag-ch">${esc(m.channelLabel)}</span>` : '';
+    if (m.type === 'tip') {
+      return `<li class="msg msg-tip${ch}"><div class="msg-meta">${chTag}<time>${time(m.ts)}</time></div><div class="msg-text">${esc(m.text)}</div></li>`;
+    }
     const mine = m.playerId === clientId;
     return `
-      <li class="msg${mine ? ' msg-mine' : ''}">
-        <div class="msg-meta"><span class="msg-name">${esc(m.name)}</span>${m.cpu ? '<span class="tag">CPU</span>' : ''}<time>${time(m.ts)}</time></div>
+      <li class="msg${mine ? ' msg-mine' : ''}${ch}">
+        <div class="msg-meta">${chTag}<span class="msg-name">${esc(m.name)}</span>${m.cpu ? '<span class="tag">CPU</span>' : ''}<time>${time(m.ts)}</time></div>
         <div class="msg-text">${esc(m.text)}</div>
       </li>`;
   }
@@ -300,7 +333,7 @@
     while (log.children.length > 300) log.firstElementChild.remove();
     scrollChat(m.playerId === clientId);
     const mobile = matchMedia('(max-width: 760px)').matches;
-    if (mobile && state.tab !== 'chat' && m.type === 'user' && m.playerId !== clientId) {
+    if (mobile && state.tab !== 'chat' && m.type !== 'system' && m.playerId !== clientId) {
       state.unread++;
       updateUnread();
     }
@@ -466,6 +499,16 @@
   });
 
   socket.on('chat:message', appendChat);
+
+  socket.on('chat:channels', (list) => {
+    const before = state.channels.map((c) => c.id).join();
+    state.channels = Array.isArray(list) && list.length ? list : [{ id: 'all', label: '全体' }];
+    if (before !== state.channels.map((c) => c.id).join()) {
+      // チーム用チャンネルができたら、そちらを送信先にしておく
+      state.sendChannel = state.channels.length > 1 ? state.channels[1].id : 'all';
+    }
+    renderChannels();
+  });
 
   socket.on('room:replaced', () => {
     state.code = null;

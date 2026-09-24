@@ -94,12 +94,22 @@ function deleteRoom(room) {
 
 // ---------- 送信まわり ----------
 
-function pushChat(room, msg) {
+// readers を渡すと、その人たちにだけ届く(チーム用チャットや個別のお知らせ)
+function pushChat(room, msg, readers = null) {
   const full = { ...msg, id: crypto.randomUUID(), ts: Date.now() };
-  room.chat.push(full);
+  room.chat.push(readers ? { ...full, readers: [...readers] } : full);
   if (room.chat.length > CHAT_LIMIT) room.chat.shift();
-  io.to(room.code).emit('chat:message', full);
+  if (!readers) return io.to(room.code).emit('chat:message', full);
+  for (const id of readers) {
+    const sid = room.players.get(id)?.socketId;
+    if (sid) io.to(sid).emit('chat:message', full);
+  }
 }
+
+const visibleChat = (room, playerId) =>
+  room.chat.filter((m) => !m.readers || m.readers.includes(playerId)).map(({ readers, ...m }) => m);
+
+const DEFAULT_CHANNELS = [{ id: 'all', label: '全体' }];
 
 const system = (room, text) => pushChat(room, { type: 'system', text });
 
@@ -124,6 +134,7 @@ function sendGameViews(room) {
     if (!p.socketId) continue;
     const view = room.game ? room.game.view(p.id) : null;
     io.to(p.socketId).emit('game:view', view ? { ...view, gameId: room.gameId, serverNow: Date.now() } : null);
+    io.to(p.socketId).emit('chat:channels', room.game?.chatChannels?.(p.id) || DEFAULT_CHANNELS);
   }
 }
 
@@ -157,6 +168,9 @@ function makeGameContext(room) {
   return {
     update: () => sendGameViews(room),
     system: (text) => system(room, text),
+    post: (msg, readers = null) => {
+      if (rooms.get(room.code) === room) pushChat(room, msg, readers);
+    },
     say: (playerId, name, text) => {
       if (rooms.get(room.code) === room) pushChat(room, { type: 'user', playerId, name, text, cpu: true });
     },
@@ -227,7 +241,7 @@ function joinRoom(socket, room, name, clientId, ack) {
   room.emptySince = null;
 
   ack({ ok: true, code: room.code, playerId: id });
-  socket.emit('chat:history', room.chat);
+  socket.emit('chat:history', visibleChat(room, id));
   sendRoomState(room);
   sendGameViews(room);
 }
@@ -261,14 +275,24 @@ io.on('connection', (socket) => {
   }));
 
   let lastChat = 0;
-  socket.on('chat:send', safe(({ text }, ack) => {
+  socket.on('chat:send', safe(({ text, channel }, ack) => {
     const { room, player } = current(socket);
     if (!room || !player) return ack({ ok: false });
     const t = String(text ?? '').trim().slice(0, 300);
     const now = Date.now();
     if (!t || now - lastChat < 250) return ack({ ok: false });
+    const ch = String(channel || 'all');
+    if (ch === 'all') {
+      lastChat = now;
+      pushChat(room, { type: 'user', playerId: player.id, name: player.name, text: t });
+      return ack({ ok: true });
+    }
+    // ゲームが用意したチーム用チャンネル
+    const info = room.game?.chatChannel?.(player.id, ch);
+    if (!info) return ack({ ok: false, error: 'このチャンネルには書き込めません' });
     lastChat = now;
-    pushChat(room, { type: 'user', playerId: player.id, name: player.name, text: t });
+    pushChat(room, { type: 'user', channel: ch, channelLabel: info.label, playerId: player.id, name: player.name, text: t }, info.readers);
+    room.game.onChat?.(player.id, ch, t);
     ack({ ok: true });
   }));
 
