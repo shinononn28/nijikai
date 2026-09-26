@@ -290,9 +290,11 @@ io.on('connection', (socket) => {
   socket.on('chat:send', safe(({ text, channel }, ack) => {
     const { room, player } = current(socket);
     if (!room || !player) return ack({ ok: false });
-    const t = String(text ?? '').trim().slice(0, 300);
+    let t = String(text ?? '').trim().slice(0, 300);
     const now = Date.now();
     if (!t || now - lastChat < 250) return ack({ ok: false });
+    // ゲームによっては発言の一部を伏せ字にする(作戦トリックの数字など)
+    if (room.game?.filterChat) t = room.game.filterChat(player.id, t) || t;
     const ch = String(channel || 'all');
     if (ch === 'all') {
       lastChat = now;

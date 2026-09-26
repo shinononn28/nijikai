@@ -48,7 +48,8 @@ class KaitoGame {
 
     const humans = shuffle(humanIds);
     const thiefOwner = settings.thiefMode === 'cpu' ? null : humans.shift() ?? null;
-    this.thief = { owner: thiefOwner, cpu: !thiefOwner, disguise: 2, double: 1, fakeTips: 3, node: null };
+    // 切り札:潜伏(その場にとどまる)・高飛び(2回移動)・変装(そのターンは確保されない)を1回ずつ
+    this.thief = { owner: thiefOwner, cpu: !thiefOwner, hide: 1, double: 1, disguise: 1, fakeTips: 3, node: null };
 
     this.detectives = humans.map((id, i) => ({ id: `d${i + 1}`, owner: id, cpu: false }));
     const cpuNames = shuffle(CPU_DETECTIVE_NAMES);
@@ -170,7 +171,13 @@ class KaitoGame {
     return true;
   }
 
-  submitThief({ path, disguise }) {
+  submitThief({ path, disguise, hide }) {
+    const wantHide = !!hide && this.thief.hide > 0;
+    const wantDisguise = !!disguise && this.thief.disguise > 0;
+    if (wantHide) {
+      this.moves.thief = { legs: [], hide: true, disguise: wantDisguise };
+      return true;
+    }
     if (!Array.isArray(path) || path.length < 1 || path.length > 2) return false;
     if (path.length === 2 && this.thief.double < 1) return false;
     const legs = [];
@@ -181,7 +188,7 @@ class KaitoGame {
       legs.push(leg);
       from = leg.to;
     }
-    this.moves.thief = { legs, disguise: !!disguise && this.thief.disguise > 0 };
+    this.moves.thief = { legs, hide: false, disguise: wantDisguise };
     return true;
   }
 
@@ -211,15 +218,18 @@ class KaitoGame {
     const final = from;
 
     // 確保の判定:同じマスに入る/同じ道ですれ違う/高飛びの途中で鉢合わせ
-    let capturedBy = null;
+    let caughtBy = null;
     legs.forEach((leg, i) => {
       for (const m of dm) {
-        if (capturedBy) return;
-        if (m.from === leg.to && m.to === leg.from) capturedBy = m.d;
-        if (i < legs.length - 1 && m.to === leg.to) capturedBy = m.d;
+        if (caughtBy) return;
+        if (m.from === leg.to && m.to === leg.from) caughtBy = m.d;
+        if (i < legs.length - 1 && m.to === leg.to) caughtBy = m.d;
       }
     });
-    if (!capturedBy) capturedBy = dm.find((m) => m.to === final)?.d ?? null;
+    if (!caughtBy) caughtBy = dm.find((m) => m.to === final)?.d ?? null;
+    // 変装していれば、そのターンは探偵の横をすり抜けられる
+    const slipped = tm.disguise && caughtBy ? caughtBy : null;
+    const capturedBy = tm.disguise ? null : caughtBy;
 
     for (const m of dm) {
       m.d.node = m.to;
@@ -227,9 +237,10 @@ class KaitoGame {
     }
     if (legs.length === 2) this.thief.double--;
     if (tm.disguise) this.thief.disguise--;
+    if (tm.hide) this.thief.hide--;
     this.thief.node = final;
     for (const leg of legs.slice(0, -1)) this.trail.push(leg.to);
-    this.trail.push(final);
+    if (legs.length) this.trail.push(final);
 
     let stolen = null;
     if (!capturedBy) {
@@ -243,21 +254,26 @@ class KaitoGame {
     const revealed = capturedBy || stolen || this.revealTurns.includes(this.turn) ? final : null;
     if (revealed !== null) this.lastKnown = { node: final, turn: this.turn };
 
-    const transports = tm.disguise ? legs.map(() => 'hidden') : legs.map((l) => l.type);
+    // 潜伏したときは、動いたように見せるため、その場から実際に出ている道の種類を1つ載せる
+    const transports = tm.hide ? [pick(this.map.adj[final]).type] : legs.map((l) => l.type);
     this.log.push({ turn: this.turn, transports, revealed, stolen, double: legs.length === 2 });
     // 画面の移動アニメーション用(怪盗のルートは怪盗本人と、ゲーム終了後だけに見せる)
     this.lastMove = {
       turn: this.turn,
       detectives: dm.map((m) => ({ id: m.d.id, from: m.from, to: m.to, type: m.type })),
-      thiefLegs: legs.map((l) => ({ from: l.from, to: l.to, type: tm.disguise ? l.type : l.type })),
+      thiefLegs: legs.map((l) => ({ from: l.from, to: l.to, type: l.type })),
+      hid: !!tm.hide,
+      slipped: slipped ? slipped.id : null,
       revealed,
       stolen,
       captured: capturedBy ? capturedBy.id : null,
     };
     this.updatePossible(transports, revealed);
 
-    const tText = transports.map((t) => (t === 'hidden' ? '変装(不明)' : TRANSPORT[t])).join('→');
+    const tText = transports.map((t) => TRANSPORT[t] || '?').join('→');
     this.ctx.system(`${this.turn}ターン目の怪盗の移動:${tText}${legs.length === 2 ? '(高飛び)' : ''}`);
+    if (slipped) this.ctx.system(`${this.detName(slipped)}のすぐそばを、変装した怪盗がすり抜けていった!`);
+    if (this.thief.owner && tm.hide) this.ctx.post({ type: 'system', text: `潜伏した。足取りには「${tText}」と載せてある` }, [this.thief.owner]);
     if (stolen) this.ctx.system(`${this.nodeName(final)}で${stolen}が盗まれた!(${stolenCount}/${NEED_STEAL})`);
     else if (revealed !== null && !capturedBy) this.ctx.system(`怪盗の位置が判明:${this.nodeName(final)}`);
 
@@ -358,9 +374,24 @@ class KaitoGame {
         }
       }
     }
-    const fancy = best.path.some((m) => m.type !== 'walk');
-    const disguise = this.thief.disguise > 0 && fancy && Math.random() < 0.35;
-    this.submitThief({ path: best.path, disguise });
+    // その場にいても安全で、近くにお宝があるなら、たまに潜伏して様子を見る
+    const here = evalNode(from) + 1;
+    if (this.thief.hide > 0 && here > best.s && Math.min(...dets.map((x) => dist[from][x])) >= 2 && Math.random() < 0.5) {
+      this.submitThief({ hide: true });
+    } else {
+      // どこへ動いても危ないときは、変装で強行突破する
+      const disguise = this.thief.disguise > 0 && best.s < -8;
+      if (disguise) {
+        let bold = null;
+        for (const m of this.legalThief(from)) {
+          const s = -Math.min(...open.map((t) => dist[m.to][t]), 9) + (open.includes(m.to) ? 6 : 0) + Math.random();
+          if (!bold || s > bold.s) bold = { s, path: [m] };
+        }
+        this.submitThief({ path: bold.path, disguise: true });
+      } else {
+        this.submitThief({ path: best.path });
+      }
+    }
     if (!sync) {
       this.checkAllDecided();
       this.ctx.update();
@@ -478,6 +509,7 @@ class KaitoGame {
         name: this.thiefName(),
         cpu: this.thief.cpu,
         disguise: this.thief.disguise,
+        hide: this.thief.hide,
         double: this.thief.double,
         decided: this.phase === 'move' ? !!this.moves.thief : null,
         node: showThief ? this.thief.node : null,
@@ -505,7 +537,7 @@ module.exports = {
   name: '怪盗と探偵',
   tagline: '街を逃げ回る怪盗を、探偵たちが包囲する。',
   description:
-    '全員が同時に移動先を決める追跡ゲーム。怪盗は12ターン以内にお宝を3つ盗めば勝ち、探偵は同じマスに入るかすれ違えば確保です。' +
+    '全員が同時に移動先を決める追跡ゲーム。怪盗は12ターン以内にお宝を3つ盗めば勝ち、探偵は同じマスに入るかすれ違えば確保です。怪盗には潜伏・高飛び・変装(すり抜け)の切り札が1回ずつ。' +
     '探偵だけの作戦チャットは一定確率で怪盗に盗聴され、届く目撃通報には怪盗の偽物が混ざります。',
   minPlayers: 1,
   maxPlayers: 6,

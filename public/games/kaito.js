@@ -14,7 +14,7 @@
       this.api = api;
       this.esc = api.esc;
       this.key = null;
-      this.sel = null; // 探偵: {to,type} / 怪盗: {legs:[{to,type}], disguise, double}
+      this.sel = null; // 探偵: {to,type} / 怪盗: {legs:[{to,type}], hide, double, disguise}
     }
 
     destroy() {
@@ -128,6 +128,13 @@
           out.push(`<text class="fx-label" x="${n.x}" y="${n.y - 50 < 20 ? n.y + 66 : n.y - 50}">${label}</text>`);
         }
       }
+      if (m.slipped && (reduced || t >= end * 0.85)) {
+        const d = v.detectives.find((x) => x.id === m.slipped);
+        if (d) {
+          const n = N[d.node];
+          out.push(`<text class="fx-label" x="${n.x}" y="${n.y - 50 < 20 ? n.y + 66 : n.y - 50}">すり抜けた!</text>`);
+        }
+      }
       out.push(`<g class="fx-banner"><rect x="${v.map.width / 2 - 115}" y="6" width="230" height="30" rx="15"/><text x="${v.map.width / 2}" y="27">${m.turn}ターン目の動き(タップで飛ばす)</text></g>`);
       fx.innerHTML = out.join('');
     }
@@ -156,7 +163,7 @@
     resetSelection(v) {
       if (v.role === 'thief') {
         const m = v.myMove;
-        this.sel = { legs: m ? m.legs.map((l) => ({ ...l })) : [], disguise: !!m?.disguise, double: (m?.legs.length ?? 1) === 2 };
+        this.sel = { legs: m ? m.legs.map((l) => ({ ...l })) : [], disguise: !!m?.disguise, hide: !!m?.hide, double: (m?.legs.length ?? 1) === 2 };
       } else if (v.role === 'detective') {
         this.sel = v.myMove ? { ...v.myMove } : null;
       } else {
@@ -176,6 +183,7 @@
       if (v.role === 'detective') return this.legalFrom(this.me().node);
       if (v.role === 'thief') {
         const legs = this.sel.legs;
+        if (this.sel.hide) return [];
         if (this.sel.double && legs.length === 1) return this.legalFrom(legs[0].to);
         return this.legalFrom(v.thief.node);
       }
@@ -372,7 +380,7 @@
       const nextReveal = v.revealTurns.find((t) => t >= v.turn);
       this.root.querySelector('#kt-status').innerHTML = `
         <span class="kt-chip">盗まれたお宝 <strong>${stolen} / ${v.needSteal}</strong></span>
-        <span class="kt-chip">怪盗の切り札 変装 <strong>${v.thief.disguise}</strong>・高飛び <strong>${v.thief.double}</strong></span>
+        <span class="kt-chip">怪盗の切り札 潜伏 <strong>${v.thief.hide}</strong>・高飛び <strong>${v.thief.double}</strong>・変装 <strong>${v.thief.disguise}</strong></span>
         ${v.phase === 'move' && nextReveal ? `<span class="kt-chip">次の位置公開 <strong>${nextReveal}ターン目</strong></span>` : ''}`;
     }
 
@@ -417,10 +425,10 @@
       // 怪盗
       const t = v.thief;
       const legs = this.sel.legs;
-      const needLegs = this.sel.double ? 2 : 1;
+      const needLegs = this.sel.hide ? 0 : this.sel.double ? 2 : 1;
       const ready = legs.length === needLegs;
       const same =
-        sent && ready && sent.disguise === this.sel.disguise && sent.legs.length === legs.length &&
+        sent && ready && sent.disguise === this.sel.disguise && !!sent.hide === this.sel.hide && sent.legs.length === legs.length &&
         sent.legs.every((l, i) => l.to === legs[i].to && l.type === legs[i].type);
       const legText = legs.map((l) => `${e(this.nodeName(l.to))}(${TRANSPORT[l.type]})`).join(' → ');
       const lastOpts = legs.length ? this.legalFrom(legs.length === 2 ? legs[0].to : t.node).filter((m) => m.to === legs[legs.length - 1].to) : [];
@@ -430,11 +438,18 @@
         <div class="kt-me"><i class="dot dot-thief"></i><strong>怪盗(あなた)</strong></div>
         <p class="kt-note">今いるのは <strong>${e(this.nodeName(t.node))}</strong>。探偵と同じマスに入るか、同じ道ですれ違うと確保されます。</p>
         <div class="kt-toggles">
+          <button class="btn btn-small${this.sel.hide ? ' btn-primary' : ''}" data-toggle="hide" ${t.hide < 1 ? 'disabled' : ''}>潜伏(残り${t.hide})</button>
+          <button class="btn btn-small${this.sel.double ? ' btn-primary' : ''}" data-toggle="double" ${t.double < 1 || this.sel.hide ? 'disabled' : ''}>高飛び(残り${t.double})</button>
           <button class="btn btn-small${this.sel.disguise ? ' btn-primary' : ''}" data-toggle="disguise" ${t.disguise < 1 ? 'disabled' : ''}>変装(残り${t.disguise})</button>
-          <button class="btn btn-small${this.sel.double ? ' btn-primary' : ''}" data-toggle="double" ${t.double < 1 ? 'disabled' : ''}>高飛び(残り${t.double})</button>
         </div>
-        <p class="kt-hint">${this.sel.disguise ? '変装中:このターンの移動手段は探偵に伏せられます。' : ''}${this.sel.double ? '高飛び中:2回続けて移動します。途中で探偵と鉢合わせても確保されます。' : ''}</p>
-        ${legs.length ? `<p class="kt-pick">ルート:<strong>${legText}</strong>${this.sel.double && legs.length === 1 ? '(2つ目を選んでください)' : ''}</p>` : '<p class="kt-pick is-empty">光っている場所をタップして移動先を選びます</p>'}
+        <p class="kt-hint">${[
+          this.sel.hide ? '潜伏:このターンは動かずにとどまります。足取りには、ここから出ている道の手段が1つ、動いたように載ります。' : '',
+          this.sel.double ? '高飛び:2回続けて移動します。途中で探偵と鉢合わせても確保されます。' : '',
+          this.sel.disguise ? '変装:このターンは、探偵と同じマスに入っても、すれ違っても確保されません(すり抜けたことは全員に知られます)。' : '',
+        ].filter(Boolean).join('<br>')}</p>
+        ${this.sel.hide
+          ? `<p class="kt-pick"><strong>${e(this.nodeName(t.node))}</strong>に潜伏する</p>`
+          : legs.length ? `<p class="kt-pick">ルート:<strong>${legText}</strong>${this.sel.double && legs.length === 1 ? '(2つ目を選んでください)' : ''}</p>` : '<p class="kt-pick is-empty">光っている場所をタップして移動先を選びます</p>'}
         ${lastOpts.length > 1 ? `<div class="kt-types">${lastOpts.map((o) => `<button class="btn btn-small${o.type === legs[legs.length - 1].type ? ' btn-primary' : ''}" data-type="${o.type}">${TRANSPORT[o.type]}</button>`).join('')}</div>` : ''}
         <button class="btn btn-primary btn-block" data-act="submit" ${!ready || same ? 'disabled' : ''}>${same ? '決定済み(選び直すと変更できます)' : sent ? '変更して決定' : 'この移動で決定'}</button>
         <div class="kt-tip">
@@ -458,12 +473,16 @@
       }
       if (b.dataset.act === 'submit') {
         if (v.role === 'detective') this.api.send('move', this.sel);
-        else this.api.send('move', { path: this.sel.legs, disguise: this.sel.disguise });
+        else this.api.send('move', { path: this.sel.legs, disguise: this.sel.disguise, hide: this.sel.hide });
         return;
       }
       if (b.dataset.toggle) {
         this.sel[b.dataset.toggle] = !this.sel[b.dataset.toggle];
         if (b.dataset.toggle === 'double') this.sel.legs = this.sel.legs.slice(0, 1);
+        if (b.dataset.toggle === 'hide' && this.sel.hide) {
+          this.sel.legs = [];
+          this.sel.double = false;
+        }
         return this.refresh(v);
       }
       if (b.dataset.type) {
