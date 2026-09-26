@@ -9,6 +9,8 @@ const gaikou = require('./gaikou');
 const meikyu = require('./meikyu');
 const kijun = require('./kijun');
 const trick = require('./trick');
+const jinushi = require('./jinushi');
+const course = require('./course');
 
 const catalog = [
   kaburi,
@@ -19,6 +21,8 @@ const catalog = [
   gaikou,
   meikyu,
   trick,
+  jinushi,
+  course,
 ];
 
 const getGame = (id) => catalog.find((g) => g.id === id) || null;
