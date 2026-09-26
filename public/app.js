@@ -444,6 +444,7 @@
 
   const gameApi = {
     send: (type, payload) => send('game:action', { type, payload }),
+    say: (text) => send('chat:send', { text, channel: 'all' }), // ゲーム画面から全体チャットに書き込む(お絵描きの回答など)
     myId: me,
     isHost,
     remaining,

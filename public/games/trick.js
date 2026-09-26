@@ -63,7 +63,6 @@
             </div>
             <aside class="kt-side">
               <section class="kt-panel" id="tr-track"></section>
-              <section class="kt-panel" id="tr-blunders"></section>
             </aside>
           </div>
           <div id="tr-overlay"></div>
@@ -76,7 +75,6 @@
       this.renderTable(v);
       this.renderMe(v);
       this.renderTrack(v);
-      this.renderBlunders(v);
       this.renderOverlay(v);
     }
 
@@ -195,13 +193,6 @@
         <p class="kt-note">薄い札はもう出た札、斜線は抜いた札、枠つきは任務の札です。</p>`;
     }
 
-    renderBlunders(v) {
-      const e = this.esc;
-      this.root.querySelector('#tr-blunders').innerHTML = `
-        <h3 class="kb-sub">今日のやらかし</h3>
-        ${v.blunders.length ? `<ul class="tr-blist">${v.blunders.map((b) => `<li><b>${e(b.name)}</b> ステージ${b.stage}${b.avoidable ? ' <span class="tag">避けられた</span>' : ''}<small>${e(b.reason)}</small></li>`).join('')}</ul>` : '<p class="kt-note">まだありません。</p>'}`;
-    }
-
     // ---------- 結果 ----------
     renderOverlay(v) {
       const el = this.root.querySelector('#tr-overlay');
@@ -239,8 +230,6 @@
           <p class="mk-rank-label">作戦の成果</p>
           <p class="mk-rank">${v.cleared}</p>
           <p class="mk-end-sub">ステージ${v.cleared}までクリア</p>
-          <h3 class="kb-sub">今日のやらかし(${v.blunders.length}回)</h3>
-          ${v.blunders.length ? `<ul class="tr-blist">${v.blunders.map((b) => `<li><b>${e(b.name)}</b> ステージ${b.stage}${b.avoidable ? ' <span class="tag">避けられた</span>' : ''}<small>${e(b.reason)}</small></li>`).join('')}</ul>` : '<p class="kt-note">ノーミス!</p>'}
           ${this.api.isHost() ? '<button class="btn btn-primary" data-act="finish">ロビーに戻る</button>' : '<p class="hint wait">ホストがロビーに戻すのを待っています</p>'}
         </div>`;
     }

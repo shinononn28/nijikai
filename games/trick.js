@@ -60,7 +60,6 @@ class TrickGame {
     this.players = humanIds.map((id) => ({ id }));
     this.stage = 0;
     this.attempt = 0;
-    this.blunders = []; // 今日のやらかし
     this.cleared = 0;
     this.seq = 0;
     this.ctx.system(`作戦トリック開始。全${settings.stages}ステージ。任務の札を、決められた人が取れば成功です`);
@@ -279,7 +278,6 @@ class TrickGame {
               : '手札がなくなったのに、終わっていない任務が残った';
       const culprit = fail.why === 'undone' ? null : fail.culprit;
       this.result = { ok: false, reason, culprit, culpritName: culprit ? this.name(culprit) : null, avoidable: !!fail.avoidable, task: t ? { card: t.card, owner: this.name(t.owner) } : null };
-      if (culprit) this.blunders.push({ stage: this.stage, name: this.name(culprit), reason, avoidable: !!fail.avoidable });
       this.ctx.system(`ステージ${this.stage} 失敗…${reason}${fail.avoidable ? '。別の札を出せば取らずに済んだ' : ''}`);
     }
     this.ctx.update();
@@ -295,7 +293,7 @@ class TrickGame {
     this.clearTimers();
     this.phase = 'ended';
     this.seq++;
-    this.ctx.system(`作戦終了。ステージ${this.cleared}までクリア、やらかしは${this.blunders.length}回`);
+    this.ctx.system(`作戦終了。ステージ${this.cleared}までクリア`);
     this.ctx.update();
   }
 
@@ -404,7 +402,6 @@ class TrickGame {
         };
       }),
       result: this.result,
-      blunders: this.blunders,
       cleared: this.cleared,
     };
     if (me) {

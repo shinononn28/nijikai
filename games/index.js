@@ -11,10 +11,18 @@ const kijun = require('./kijun');
 const trick = require('./trick');
 const jinushi = require('./jinushi');
 const course = require('./course');
+const oekaki = require('./oekaki');
+const dengon = require('./dengon');
+const tasuketsu = require('./tasuketsu');
+const slider = require('./slider');
 
 const catalog = [
   kaburi,
   kijun,
+  oekaki,
+  dengon,
+  tasuketsu,
+  slider,
   moon,
   kaito,
   nimaijita,

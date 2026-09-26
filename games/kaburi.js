@@ -111,9 +111,10 @@ class KaburiGame {
     this.newTopic(false);
   }
 
-  newTopic(isReroll) {
+  newTopic(isReroll, custom = null) {
     this.phase = 'answer';
-    this.topic = pickTopic(this.s.initialMode, this.used);
+    // custom:ホストが手で書いたお題
+    this.topic = custom ? { category: custom, initial: null, text: custom } : pickTopic(this.s.initialMode, this.used);
     this.used.add(this.topic.text);
     this.answers = {};
     this.ready = new Set();
@@ -121,7 +122,7 @@ class KaburiGame {
     this.endsAt = Date.now() + ms;
     this.setTimer(ms + SUBMIT_GRACE_MS, () => this.startJudge());
     this.seq++;
-    this.ctx.system(`${isReroll ? 'お題を引き直しました。' : `第${this.round}ラウンド。`}お題は ${this.topic.text}`);
+    this.ctx.system(`${custom ? 'ホストがお題を書きました。' : isReroll ? 'お題を引き直しました。' : `第${this.round}ラウンド。`}お題は ${this.topic.text}`);
     this.ctx.update();
   }
 
@@ -305,6 +306,12 @@ class KaburiGame {
       case 'reroll':
         if (this.phase !== 'answer' || !isHost) return;
         return this.newTopic(true);
+      case 'customTopic': {
+        if (this.phase !== 'answer' || !isHost) return;
+        const text = String(payload.text || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+        if (!text) return;
+        return this.newTopic(true, text);
+      }
       case 'propose':
         if (this.phase !== 'judge' || !member) return;
         this.propose(pid, payload.type, payload.groupIds);

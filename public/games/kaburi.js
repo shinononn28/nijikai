@@ -89,6 +89,10 @@
                 <button class="btn" id="kb-done"></button>
                 ${host ? '<button class="btn btn-quiet" id="kb-reroll">お題を引き直す</button>' : ''}
               </div>
+              ${host ? `<details class="kb-custom"><summary>お題を自分で書く(ホスト)</summary>
+                <div class="answer-entry"><input id="kb-custom" maxlength="30" placeholder="例:冷蔵庫にありがちなもの" autocomplete="off"><button class="btn" id="kb-custom-go">このお題にする</button></div></details>` : ''}
+              <div>
+              </div>
             ` : `<p class="spectate">途中から入ったので、次のラウンドから参加します。今は様子を見ながらチャットで話せます。</p>`}
             <h3 class="kb-sub">みんなの進み具合</h3>
             <ul class="status-list" id="kb-status"></ul>
@@ -113,6 +117,16 @@
           };
           this.renderMine();
           if (!matchMedia('(pointer: coarse)').matches) input.focus();
+        }
+        const customGo = this.root.querySelector('#kb-custom-go');
+        if (customGo) {
+          const ci = this.root.querySelector('#kb-custom');
+          const go = () => {
+            const t = ci.value.trim();
+            if (t && confirm(`お題を「${t}」にしますか?全員の回答はリセットされます。`)) this.api.send('customTopic', { text: t });
+          };
+          customGo.onclick = go;
+          this.api.onEnter(ci, go);
         }
         const reroll = this.root.querySelector('#kb-reroll');
         if (reroll) reroll.onclick = () => {
