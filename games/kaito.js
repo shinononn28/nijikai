@@ -508,9 +508,9 @@ class KaitoGame {
       thief: {
         name: this.thiefName(),
         cpu: this.thief.cpu,
-        disguise: this.thief.disguise,
-        hide: this.thief.hide,
-        double: this.thief.double,
+        disguise: showThief ? this.thief.disguise : null,
+        hide: showThief ? this.thief.hide : null,
+        double: showThief ? this.thief.double : null,
         decided: this.phase === 'move' ? !!this.moves.thief : null,
         node: showThief ? this.thief.node : null,
         fakeTips: role === 'thief' ? this.thief.fakeTips : null,

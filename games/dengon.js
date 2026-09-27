@@ -41,7 +41,7 @@ class DengonGame {
     this.ctx = ctx;
     this.s = settings;
     this.timers = new Set();
-    this.order = shuffle(humanIds);
+    this.order = [...humanIds]; // ロビーの並び順のまま、次の人へ回す
     this.N = this.order.length;
     this.chains = this.order.map((owner) => ({ owner, entries: [] }));
     this.round = 0;
@@ -210,6 +210,9 @@ class DengonGame {
       const c = this.chains[this.chainFor(pid)];
       const prev = c.entries[c.entries.length - 1] || null;
       v.task = { kind: k, prev: prev ? (prev.type === 'text' ? { type: 'text', text: prev.text || '(白紙)' } : { type: 'draw', strokes: prev.strokes }) : null };
+      const i = this.order.indexOf(pid);
+      v.from = prev ? this.name(prev.by) : null;
+      v.to = this.round < this.N - 1 ? this.name(this.order[(i + 1) % this.N]) : null;
       v.suggest = k === 'write' ? this.suggest[pid] : null;
       v.submitted = !!this.subs[pid];
     }

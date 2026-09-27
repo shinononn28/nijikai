@@ -1153,3 +1153,27 @@ th:not(:first-child) { text-align: right; }
 .sl-list { display: grid; gap: 0.3rem; margin-top: 0.8rem; }
 .sl-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 0.8rem; align-items: baseline; border-bottom: 1px dashed var(--line); padding: 0.2rem 0; }
 .sl-list b { color: var(--good); }
+
+.dg-route { text-align: center; color: var(--felt-muted); font-size: 0.9rem; }
+.dg-route b { color: var(--felt-text); }
+
+.ok-guesses { display: grid; gap: 0.35rem; }
+.ok-guesses li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.9rem; border-bottom: 1px dashed var(--line); padding-bottom: 0.3rem; }
+.cs-item.is-on { border-color: var(--red); background: #fff3f0; }
+
+/* 地主:持ち主がひと目でわかるように */
+.jn-cell.is-owned { background: color-mix(in srgb, var(--oc) 16%, #f7f2e6); box-shadow: inset 0 0 0 3px var(--oc); }
+.jn-cell.is-mine { box-shadow: inset 0 0 0 4px var(--oc), 0 0 0 2px #fff; }
+.jn-owner { position: absolute; top: 20%; right: 2px; background: var(--oc); color: #fff; font-weight: 700; font-size: 0.85em; line-height: 1; padding: 2px 3px; border-radius: 4px; }
+.jn-cell.is-mine .jn-owner { background: var(--ink); outline: 2px solid var(--oc); }
+
+/* ダンジョン合流:扉の覗き見と全体地図 */
+.mk-peek { font-size: 1.05rem; line-height: 1.1; letter-spacing: -0.05em; }
+.mk-full svg { width: 100%; height: auto; background: #f4efe2; border-radius: var(--radius-ctl); }
+.mk-full .mf-room rect { fill: #fff; stroke: #cfc5ae; stroke-width: 2; cursor: pointer; }
+.mk-full .mf-room:hover rect { fill: #fff5dc; }
+.mk-full line { stroke: #8a8577; stroke-width: 5; stroke-linecap: round; }
+.mk-full text { font-size: 13px; text-anchor: middle; pointer-events: none; }
+.mk-full .mf-pin { stroke: #fff; stroke-width: 2; pointer-events: none; }
+.mk-full .mf-pin.is-mine { stroke: var(--ink); stroke-width: 3; }
+@media (min-width: 1100px) { .mk-layout { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); } }

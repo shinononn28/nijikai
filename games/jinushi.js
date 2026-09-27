@@ -4,13 +4,13 @@
 // 二次会向けに、決まった周回数で終わり、そのときの総資産で勝負する。
 
 const GROUPS = {
-  A: { name: '下町', color: '#8b5a2b', price: 60, house: 50 },
-  B: { name: '住宅街', color: '#6fb0d8', price: 100, house: 50 },
-  C: { name: '商店街', color: '#c24f9a', price: 140, house: 100 },
-  D: { name: '学生街', color: '#e8903a', price: 180, house: 100 },
-  E: { name: 'オフィス街', color: '#c8323c', price: 220, house: 150 },
-  F: { name: '繁華街', color: '#d9b02a', price: 260, house: 150 },
-  G: { name: '湾岸', color: '#2f8a5a', price: 320, house: 200 },
+  A: { name: '下町', color: '#8b5a2b', price: 60, house: 80 },
+  B: { name: '住宅街', color: '#6fb0d8', price: 100, house: 110 },
+  C: { name: '商店街', color: '#c24f9a', price: 140, house: 150 },
+  D: { name: '学生街', color: '#e8903a', price: 180, house: 190 },
+  E: { name: 'オフィス街', color: '#c8323c', price: 220, house: 230 },
+  F: { name: '繁華街', color: '#d9b02a', price: 260, house: 270 },
+  G: { name: '湾岸', color: '#2f8a5a', price: 320, house: 320 },
 };
 // 28マス(8×8の外周)
 const SPACES = [
@@ -538,7 +538,7 @@ module.exports = {
   cpu: true,
   settings: [
     { key: 'cpu', label: 'CPUの人数', default: 0, options: [0, 1, 2, 3].map((n) => ({ value: n, label: n ? `${n}人` : 'なし' })) },
-    { key: 'laps', label: '長さ', default: 12, options: [8, 12, 16, 20].map((n) => ({ value: n, label: `1人${n}ターン` })) },
+    { key: 'laps', label: '長さ', default: 16, options: [8, 12, 16, 20, 25, 30, 40].map((n) => ({ value: n, label: `1人${n}ターン` })) },
     {
       key: 'buyout',
       label: '強制買収',

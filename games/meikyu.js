@@ -174,10 +174,13 @@ class MeikyuGame {
       m.follow = null;
     }
     // 松明は各自が持つ(1人が全部探索して回る、という解き方をできなくするため)。
-    // 本数は「地図が見えていれば、その人が集合場所まで何歩か」の約2.4倍+6本。遠い人ほど多い
-    for (const [m, need] of this.shortestShares()) {
-      m.torch = Math.ceil(need * 2.4) + 6;
-      m.torchMax = m.torch;
+    // 本数は「地図が見えていれば、集合場所まで平均何歩か」の約2.4倍+6本で、全員同じ
+    // 全員同じ本数にする(遠くから出発した人には、近くの人が松明を分けて助ける余地を残す)
+    const shares = this.shortestShares();
+    const each = Math.ceil((shares.reduce((sum, [, need]) => sum + need, 0) / Math.max(1, shares.length)) * 2.4) + 6;
+    for (const [m] of shares) {
+      m.torch = each;
+      m.torchMax = each;
     }
     this.syncTorch();
     // 魔物:誰からも遠い部屋から
@@ -188,6 +191,7 @@ class MeikyuGame {
     } else {
       this.monster = null;
     }
+    this.pins = {}; // 全体地図に置く「ここにいるかも」のピン
     this.phase = 'explore';
     this.endsAt = Date.now() + this.s.floorMinutes * 60000;
     this.later(this.s.floorMinutes * 60000, () => this.failFloor('time'));
@@ -376,12 +380,14 @@ class MeikyuGame {
     const parts = [feats.length ? `${feats.join('と')}がある部屋` : '何もない部屋'];
     const doors = [0, 1, 2, 3].filter((d) => r.doors[d]).map((d) => this.dirLabel(m, d));
     parts.push(`扉は${doors.join('・')}`);
-    const senses = [0, 1, 2, 3]
+    const peeks = [0, 1, 2, 3]
       .filter((d) => r.doors[d])
-      .map((d) => ({ d, s: this.senseOf(this.neighbor(r, d)) }))
-      .filter((x) => x.s)
-      .map((x) => `${this.dirLabel(m, x.d)}から${x.s.text}`);
-    if (senses.length) parts.push(senses.join('、'));
+      .map((d) => {
+        const n = this.neighbor(r, d);
+        const f = n.features.map((k) => feature(k).name);
+        return `${this.dirLabel(m, d)}の部屋:${f.length ? f.join('と') : '何もない'}`;
+      });
+    if (peeks.length) parts.push(peeks.join('、'));
     const marks = r.marks.map((k) => `${k.colorName}のチョーク`);
     if (marks.length) parts.push(`${marks.join('と')}の印あり`);
     return parts.join('。');
@@ -446,6 +452,14 @@ class MeikyuGame {
       to.torch += 1;
       this.syncTorch();
       this.ctx.system(`${this.nameOf(m)}が${this.nameOf(to)}に松明を1本渡した`);
+    } else if (type === 'pin') {
+      if (this.phase !== 'explore' || this.s.mapMode !== 'full') return;
+      const x = Number(payload.x);
+      const y = Number(payload.y);
+      const cur = this.pins[m.id];
+      if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= SIZE || y >= SIZE) delete this.pins[m.id];
+      else if (cur && cur.x === x && cur.y === y) delete this.pins[m.id];
+      else this.pins[m.id] = { x, y };
     } else if (type === 'report') {
       if (this.phase !== 'explore') return;
       const now = Date.now();
@@ -523,10 +537,26 @@ class MeikyuGame {
         doors: [0, 1, 2, 3].map((rel) => {
           const abs = (rel + m.rot) % 4;
           const open = r.doors[abs];
-          const s = open ? this.senseOf(this.neighbor(r, abs)) : null;
-          return { rel, open, label: this.dirLabel(m, abs), sense: s };
+          const n = open ? this.neighbor(r, abs) : null;
+          const monster = !!(n && this.monster && this.monster.room === n);
+          // 扉の向こうの部屋の目印が見える(覗き見)。魔物がいればうなり声
+          return {
+            rel,
+            open,
+            label: this.dirLabel(m, abs),
+            peek: n ? n.features.map((k) => feature(k).icon) : null,
+            sense: monster ? MONSTER_SENSE : null,
+          };
         }),
       },
+      // 全体地図(北が上)。自分や仲間の位置は載らない
+      map: this.s.mapMode === 'full'
+        ? {
+            size: SIZE,
+            rooms: this.maze.rooms.map((x) => ({ x: x.x, y: x.y, doors: x.doors, icons: x.features.map((k) => feature(k).icon) })),
+            pins: Object.entries(this.pins).map(([id, p]) => ({ ...p, color: this.member(id)?.color, name: this.nameOf(this.member(id)), mine: id === pid })),
+          }
+        : null,
       // 自分が歩いた部屋だけ。座標はスタート地点からの相対を、その人の画面の向きに回して返す
       explored: [...m.explored].map((x) => {
         let dx = x.x - m.start.x;
@@ -544,7 +574,7 @@ module.exports = {
   name: 'ダンジョン合流',
   tagline: 'はぐれたパーティが、チャットで様子を伝え合って迷宮の中で合流する協力ゲーム。',
   description:
-    '見えるのは自分の部屋の目印・扉・扉の向こうの気配だけ。チャットで「石像があって東から水の音」と伝え合い、全員が同じ部屋に集まれば次の階へ。' +
+    '全体地図は全員が持っているけれど、自分がどこにいるかはわからない。見えるのは自分の部屋と扉の向こうの部屋の目印。チャットで伝え合って居場所を絞り込み、全員が同じ部屋に集まれば次の階へ。' +
     '松明は各自が持ち、1部屋1本(負傷した仲間に肩を貸すと2本)。同じ部屋にいれば分け合えます。徘徊する魔物に出くわすと松明を落とします。残った松明でランクが決まります。',
   minPlayers: 2,
   maxPlayers: 6,
@@ -560,6 +590,15 @@ module.exports = {
         { value: 'staged', label: '1階だけ方角あり、2階からバラバラ' },
         { value: 'fixed', label: 'ずっと方角あり(全員北が上)' },
         { value: 'rotated', label: 'ずっとバラバラ(前後左右だけ)' },
+      ],
+    },
+    {
+      key: 'mapMode',
+      label: '地図',
+      default: 'full',
+      options: [
+        { value: 'full', label: '全体地図あり(自分の位置は不明)' },
+        { value: 'none', label: '地図なし(歩いた所だけ)' },
       ],
     },
     { key: 'floors', label: '階の数', default: 3, options: [1, 2, 3].map((n) => ({ value: n, label: `${n}階` })) },

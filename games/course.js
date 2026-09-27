@@ -11,19 +11,21 @@ const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -
 const CHARS = {
   jumper: { name: 'ジャンパー', text: '縦横に2マス跳べる(間のマスは無視)' },
   diag: { name: 'ナナメ', text: '斜めにも進める' },
-  tough: { name: 'タフ', text: '1回の挑戦で、罠を1回だけ耐える' },
+  tough: { name: 'タフ', text: '落とし穴・点滅床を1回だけ耐え、トゲは効かない' },
   runner: { name: '健脚', text: '歩数が3多い' },
 };
 const ITEMS = {
   wall: { name: '壁', text: '通れない(ジャンパーは跳び越せる)' },
-  pit: { name: '落とし穴', text: '踏んだら脱落' },
-  spike: { name: 'トゲ', text: '踏んだら脱落' },
+  pit: { name: '落とし穴', text: '踏んだら脱落(タフは1回だけ耐える)' },
+  spike: { name: 'トゲ', text: '踏むと残り歩数が3減る(タフは平気)' },
   spring: { name: 'バネ', text: '踏むと同じ向きに2マス飛ばされる' },
   blink: { name: '点滅床', text: '偶数歩目は穴になる' },
   decoy: { name: '見せかけ', text: 'ただの床。伏せて置くと罠に見える' },
-  eraser: { name: '消しゴム', text: '置いてある部品を1つ消す' },
+  eraser: { name: '消しゴム', text: '前のラウンドまでに表向きで置かれた部品を1つ消す' },
 };
-const ITEM_POOL = ['wall', 'wall', 'pit', 'pit', 'spike', 'spike', 'spring', 'blink', 'decoy', 'eraser'];
+// 部品の出やすさ(消しゴムは少人数だと強すぎるので出にくく、1人の手札に1つまで)
+const ITEM_WEIGHTS = { wall: 3, pit: 3, spike: 3, spring: 2, blink: 2, decoy: 2, eraser: 1 };
+const HAND = 3; // 各自に配られる部品の候補数
 const BASE_STEPS = 12;
 const COLORS = ['#c8323c', '#2f6fb0', '#2f8a5a', '#c7801f', '#7a4fb0', '#2f9fa8'];
 
@@ -47,13 +49,20 @@ function simulate(cells, plan, char, maxSteps) {
   let x = START.x;
   let y = START.y;
   let shield = char === 'tough' ? 1 : 0;
+  let budget = maxSteps;
   const steps = [{ x, y, t: 0 }];
   const triggered = [];
   const hit = (cell, t) => {
     const c = cells[key(cell.x, cell.y)];
     if (!c) return null;
     const type = c.type;
-    if (type === 'pit' || type === 'spike' || (type === 'blink' && t % 2 === 0)) {
+    if (type === 'spike') {
+      triggered.push(key(cell.x, cell.y));
+      if (char === 'tough') return null;
+      budget -= 3;
+      return 'spike';
+    }
+    if (type === 'pit' || (type === 'blink' && t % 2 === 0)) {
       triggered.push(key(cell.x, cell.y));
       if (shield > 0) {
         shield--;
@@ -64,7 +73,7 @@ function simulate(cells, plan, char, maxSteps) {
     if (type === 'spring' || type === 'decoy') triggered.push(key(cell.x, cell.y));
     return type === 'spring' ? 'spring' : null;
   };
-  for (let t = 1; t <= Math.min(plan.length, maxSteps); t++) {
+  for (let t = 1; t <= plan.length && t <= budget; t++) {
     const a = plan[t - 1];
     const [dx, dy] = DIRS[a.d] || [0, 0];
     if (a.d >= 4 && char !== 'diag') return { steps, result: 'invalid', triggered };
@@ -99,7 +108,7 @@ function simulate(cells, plan, char, maxSteps) {
       ev = hit({ x, y }, t);
     }
     if (ev === 'dead') return { steps: [...steps, { x, y, t, event: 'dead' }], result: 'dead', killerCell: key(x, y), triggered };
-    steps.push({ x, y, t, event: ev === 'endure' ? 'endure' : isGoal(x) ? 'goal' : null });
+    steps.push({ x, y, t, event: ev === 'endure' ? 'endure' : ev === 'spike' ? 'spike' : isGoal(x) ? 'goal' : null });
     if (isGoal(x)) return { steps, result: 'goal', time: t, triggered };
   }
   return { steps, result: 'timeout', triggered };
@@ -121,7 +130,7 @@ class CourseGame {
     this.round = 0;
     this.picks = {};
     this.plans = {};
-    this.offer = [];
+    this.hands = {};
     this.history = [];
     this.seq = 0;
     this.phase = 'chars';
@@ -162,40 +171,47 @@ class CourseGame {
     this.clearTimers();
     for (const p of this.players) if (!p.char) p.char = pick(Object.keys(CHARS));
     this.round++;
-    this.offer = shuffle(ITEM_POOL).slice(0, this.players.length + 1).map((type, i) => ({ id: `i${this.round}-${i}`, type, taken: null }));
-    // 点数の低い人から選ぶ(同点は順不同)
+    // 部品は各自にこっそり配り、こっそり選ぶ(何を選んだかはほかの人にはわからない)
+    const bag = Object.entries(ITEM_WEIGHTS).flatMap(([t, w]) => Array(w).fill(t));
+    this.hands = {};
+    for (const p of this.players) {
+      const hand = [];
+      while (hand.length < HAND) {
+        const t = pick(bag);
+        if (t === 'eraser' && (hand.includes('eraser') || this.players.length <= 2)) continue;
+        hand.push(t);
+      }
+      this.hands[p.id] = hand.map((type, i) => ({ id: `i${this.round}-${p.id.slice(0, 4)}-${i}`, type }));
+    }
+    // 置く順は点数の低い人から(同点は順不同)
     this.order = shuffle(this.players).sort((a, b) => a.score - b.score).map((p) => p.id);
-    this.orderIndex = 0;
     this.picks = {};
     this.plans = {};
     this.run = null;
     this.phase = 'pick';
-    this.seq++;
-    this.ctx.system(`第${this.round}ラウンド。点数の低い人から部品を選びます`);
-    this.nextPicker();
-  }
-
-  nextPicker() {
-    while (this.orderIndex < this.order.length && !this.p(this.order[this.orderIndex])) this.orderIndex++;
-    if (this.orderIndex >= this.order.length) return this.startPlace();
-    this.picker = this.order[this.orderIndex];
     this.endsAt = Date.now() + 25000;
-    this.clearTimers();
-    this.later(25000, () => this.pickItem(this.picker, pick(this.offer.filter((o) => !o.taken)).id));
+    this.seq++;
+    this.later(25000, () => {
+      for (const p of this.players) if (!this.picks[p.id]) this.picks[p.id] = pick(this.hands[p.id]).type;
+      this.startPlace();
+    });
+    this.ctx.system(`第${this.round}ラウンド。配られた部品から1つ、こっそり選んでください`);
     this.ctx.update();
   }
 
   pickItem(pid, itemId) {
-    if (this.phase !== 'pick' || pid !== this.picker) return;
-    const it = this.offer.find((o) => o.id === itemId && !o.taken);
+    if (this.phase !== 'pick' || !this.hands[pid]) return;
+    const it = this.hands[pid].find((o) => o.id === itemId);
     if (!it) return;
-    it.taken = pid;
     this.picks[pid] = it.type;
-    this.orderIndex++;
-    this.nextPicker();
+    if (this.players.every((p) => this.picks[p.id] || !this.active(p.id))) {
+      for (const p of this.players) if (!this.picks[p.id]) this.picks[p.id] = pick(this.hands[p.id]).type;
+      this.startPlace();
+    }
   }
 
   startPlace() {
+    if (this.phase !== 'pick') return;
     this.phase = 'place';
     this.orderIndex = 0;
     this.seq++;
@@ -222,12 +238,14 @@ class CourseGame {
     const k = key(x, y);
     if (x === START.x && y === START.y) return;
     if (type === 'eraser') {
-      if (!this.cells[k]) return;
+      const c = this.cells[k];
+      // 消せるのは、前のラウンドまでに表向きで置かれた部品だけ
+      if (!c || c.hidden || c.round === this.round) return;
       delete this.cells[k];
       this.ctx.system(`${this.name(pid)}さんが消しゴムで部品を1つ消した`);
     } else {
       if (this.cells[k] || isGoal(x)) return;
-      this.cells[k] = { type, owner: pid, hidden: !!hidden };
+      this.cells[k] = { type, owner: pid, hidden: !!hidden, round: this.round };
       this.ctx.system(`${this.name(pid)}さんが${hidden ? '何かを伏せて' : `${ITEMS[type].name}を`}置いた`);
     }
     this.orderIndex++;
@@ -357,7 +375,7 @@ class CourseGame {
       this.seq++;
       return;
     }
-    if (this.phase === 'pick' && this.picker === id) this.nextPicker();
+    if (this.phase === 'pick' && this.players.every((p) => this.picks[p.id] || !this.active(p.id))) this.startPlace();
     if (this.phase === 'place' && this.placer === id) { this.orderIndex++; this.nextPlacer(); }
     if (this.phase === 'plan' && this.players.every((x) => !this.active(x.id) || this.plans[x.id]?.ready)) this.startRun();
   }
@@ -373,7 +391,7 @@ class CourseGame {
       const [x, y] = k.split(',').map(Number);
       const mine = c.owner === pid;
       const shown = !c.hidden || mine || this.phase === 'ended';
-      return { x, y, type: shown ? c.type : 'hidden', hidden: c.hidden, owner: c.owner, ownerColor: this.p(c.owner)?.color || null };
+      return { x, y, type: shown ? c.type : 'hidden', hidden: c.hidden, owner: c.owner, ownerColor: this.p(c.owner)?.color || null, fresh: c.round === this.round };
     });
     return {
       phase: this.phase,
@@ -395,10 +413,9 @@ class CourseGame {
         char: p.char,
         steps: this.steps(p),
         planned: this.phase === 'plan' ? !!this.plans[p.id]?.ready : null,
-        item: this.phase === 'pick' || this.phase === 'place' ? this.picks[p.id] || null : null,
+        picked: this.phase === 'pick' ? !!this.picks[p.id] : null,
       })),
-      offer: this.phase === 'pick' ? this.offer : null,
-      picker: this.phase === 'pick' ? this.picker : null,
+      myHand: this.phase === 'pick' && me ? this.hands[pid] : null,
       placer: this.phase === 'place' ? this.placer : null,
       myItem: me ? this.picks[pid] || null : null,
       myPlan: me ? this.plans[pid] || null : null,
@@ -414,7 +431,7 @@ module.exports = {
   tagline: '部品を置いてコースを作り、自分だけがゴールできるコースを狙う。',
   description:
     '毎ラウンド部品を1つ選んでコースに置き(伏せて置くと中身は本人しか知らない)、全員が経路を計画して一斉にスタート。' +
-    'ゴールした人に得点、ただし全員ゴールしたら誰も得点なし。キャラクターごとに動き方が違うので、自分だけ通れる道を仕込めます。',
+    'ゴールした人に得点、ただし全員ゴールしたら誰も得点なし。部品はこっそり選ぶので、伏せて置けば中身は本人にしかわかりません。キャラクターごとに動き方も違います。',
   minPlayers: 2,
   maxPlayers: 6,
   cpu: false,

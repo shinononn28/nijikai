@@ -380,7 +380,9 @@
       const nextReveal = v.revealTurns.find((t) => t >= v.turn);
       this.root.querySelector('#kt-status').innerHTML = `
         <span class="kt-chip">盗まれたお宝 <strong>${stolen} / ${v.needSteal}</strong></span>
-        <span class="kt-chip">怪盗の切り札 潜伏 <strong>${v.thief.hide}</strong>・高飛び <strong>${v.thief.double}</strong>・変装 <strong>${v.thief.disguise}</strong></span>
+        ${v.thief.hide === null
+          ? '<span class="kt-chip">怪盗の切り札 潜伏・高飛び・変装 各1回(使ったかどうかは秘密)</span>'
+          : `<span class="kt-chip">${v.role === 'thief' ? 'あなたの' : '怪盗の'}切り札 潜伏 <strong>${v.thief.hide}</strong>・高飛び <strong>${v.thief.double}</strong>・変装 <strong>${v.thief.disguise}</strong></span>`}
         ${v.phase === 'move' && nextReveal ? `<span class="kt-chip">次の位置公開 <strong>${nextReveal}ターン目</strong></span>` : ''}`;
     }
 

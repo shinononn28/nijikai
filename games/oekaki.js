@@ -88,6 +88,8 @@ class OekakiGame {
     this.word = null;
     this.strokes = [];
     this.correct = []; // 正解した順
+    this.guesses = []; // 出題者が手で判定するための回答の記録
+    this.guessSeq = 0;
     this.phase = 'choose';
     this.endsAt = Date.now() + CHOOSE_MS;
     this.seq++;
@@ -173,6 +175,10 @@ class OekakiGame {
     if (k.length >= 2 && (lev(k, this.key) <= 1 || (k.length >= 2 && this.key.includes(k) && k.length >= this.key.length - 2))) {
       this.ctx.post({ type: 'system', text: `「${text}」はおしい!` }, [pid]);
     }
+    // 出題者が手で「正解」にできるよう、回答の候補として残す
+    this.guesses.push({ id: `g${++this.guessSeq}`, pid, text: text.slice(0, 30) });
+    if (this.guesses.length > 30) this.guesses.shift();
+    setTimeout(() => this.ctx.update(), 0);
     return text;
   }
 
@@ -209,6 +215,16 @@ class OekakiGame {
         this.strokes = [];
         this.broadcast('redraw', { strokes: [] });
         return;
+      case 'accept': {
+        // 出題者の手動判定:言い回し違いの答えなどを正解にする
+        if (this.phase !== 'draw' || pid !== this.drawer) return;
+        const g = this.guesses.find((x) => x.id === payload.id);
+        if (!g || this.correct.includes(g.pid) || !this.p(g.pid)) return;
+        this.ctx.system(`${this.name(this.drawer)}さんが、${this.name(g.pid)}さんの回答を正解にした`);
+        this.onCorrect(g.pid);
+        this.ctx.update();
+        return;
+      }
       case 'skip':
         if (this.phase === 'draw' && (pid === this.drawer || isHost)) this.endTurn();
         return;
@@ -257,6 +273,10 @@ class OekakiGame {
       length: this.word ? [...this.word].length : null,
       hint: this.hint(),
       correct: (this.correct || []).map((id) => this.name(id)),
+      // 出題者にだけ、まだ正解していない人の最近の回答を見せる
+      guesses: isDrawer && this.phase === 'draw'
+        ? this.guesses.filter((g) => !this.correct.includes(g.pid)).slice(-12).reverse().map((g) => ({ id: g.id, name: this.name(g.pid), text: g.text }))
+        : null,
       iGuessed: this.correct?.includes(pid) || false,
       players: [...this.players].sort((a, b) => b.score - a.score).map((p) => ({ id: p.id, name: this.name(p.id), score: p.score, drawer: p.id === this.drawer, correct: this.correct?.includes(p.id) })),
       gallery: this.phase === 'ended' ? this.gallery.map((g) => ({ word: g.word, drawer: this.name(g.drawer), strokes: g.strokes, correct: g.correct })) : null,

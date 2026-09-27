@@ -81,6 +81,8 @@
           <div class="mk-layout">
             <div class="mk-room-wrap" id="mk-room"></div>
             <aside class="mk-side">
+              ${v.map ? `<section class="kt-panel"><h3 class="kb-sub">迷宮の全体地図(北が上)</h3><div id="mk-full" class="mk-full"></div>
+                <p class="kt-note">自分や仲間の位置は載っていません。目印と扉の形から居場所を推理し、マスをタップすると「ここにいるかも」のピンを立てられます(全員に見えます)。</p></section>` : ''}
               <section class="kt-panel" id="mk-tools"></section>
               <section class="kt-panel"><h3 class="kb-sub">自分の地図</h3><div id="mk-map" class="mk-map"></div>
                 <p class="kt-note">自分が歩いた部屋だけが描かれます。${v.compass === 'fixed' ? '上が北です。' : '向きはあなたの画面の向き(上が前)です。仲間の地図とは向きが違うかもしれません。'}</p></section>
@@ -92,6 +94,10 @@
       this.root.querySelector('#mk-room').addEventListener('click', (ev) => {
         const b = ev.target.closest('[data-door]');
         if (b) this.move(Number(b.dataset.door));
+      });
+      this.root.querySelector('#mk-full')?.addEventListener('click', (ev) => {
+        const g = ev.target.closest('[data-x]');
+        if (g) this.api.send('pin', { x: Number(g.dataset.x), y: Number(g.dataset.y) });
       });
       this.root.querySelector('#mk-tools').addEventListener('click', (ev) => {
         const g = ev.target.closest('[data-give]');
@@ -109,6 +115,7 @@
         this.renderRoom(v);
         this.renderTools(v);
         this.renderMap(v);
+        this.renderFull(v);
       } else {
         this.root.querySelector('#mk-room').innerHTML = '<p class="spectate">観戦中です。次のゲームから参加できます。</p>';
       }
@@ -151,7 +158,8 @@
           return `
             <button class="mk-door mk-${pos[d.rel]}" data-door="${d.rel}" ${cd ? 'disabled' : ''} aria-label="${e(d.label)}の扉へ進む">
               <span class="mk-door-label">${e(d.label)}</span>
-              ${d.sense ? `<span class="mk-sense${d.sense.icon === '👹' ? ' is-danger' : ''}">${d.sense.icon} ${e(d.sense.text)}</span>` : ''}
+              <span class="mk-peek">${d.peek && d.peek.length ? d.peek.join('') : '·'}</span>
+              ${d.sense ? `<span class="mk-sense is-danger">${d.sense.icon} ${e(d.sense.text)}</span>` : ''}
             </button>`;
         })
         .join('');
@@ -171,7 +179,7 @@
         </div>
         ${v.me.torch < v.me.cost
           ? '<p class="mk-stuck">松明が尽きて動けません。仲間にこの部屋まで来てもらい、松明を分けてもらいましょう。</p>'
-          : '<p class="kt-note mk-help">扉をタップして進みます(PCは矢印キーやWASDでも)。扉の横の文字は、その向こうの部屋から伝わる気配です。</p>'}`;
+          : '<p class="kt-note mk-help">扉をタップして進みます(PCは矢印キーやWASDでも)。扉の中の絵は、その向こうの部屋に見える目印です。</p>'}`;
     }
 
     flashHit() {
@@ -232,6 +240,33 @@
       const w = W * S + 12;
       const h = H * S + 12;
       this.root.querySelector('#mk-map').innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="max-width:${Math.min(w * 1.2, 320)}px">${parts.join('')}</svg>`;
+    }
+
+    // 全体地図:部屋の目印・扉・みんなのピン
+    renderFull(v) {
+      const el = this.root.querySelector('#mk-full');
+      if (!el || !v.map) return;
+      const S = 46;
+      const n = v.map.size;
+      const parts = [];
+      for (const r of v.map.rooms) {
+        const x = r.x * S;
+        const y = r.y * S;
+        parts.push(`<g class="mf-room" data-x="${r.x}" data-y="${r.y}"><rect x="${x + 5}" y="${y + 5}" width="${S - 10}" height="${S - 10}" rx="5"/>`);
+        const mid = S / 2;
+        const seg = [[x + mid, y + 5, x + mid, y], [x + S - 5, y + mid, x + S, y + mid], [x + mid, y + S - 5, x + mid, y + S], [x + 5, y + mid, x, y + mid]];
+        r.doors.forEach((open, i) => { if (open) parts.push(`<line x1="${seg[i][0]}" y1="${seg[i][1]}" x2="${seg[i][2]}" y2="${seg[i][3]}"/>`); });
+        parts.push(`<text x="${x + mid}" y="${y + mid + 6}">${r.icons.join('')}</text></g>`);
+      }
+      const byCell = {};
+      for (const p of v.map.pins) (byCell[`${p.x},${p.y}`] ||= []).push(p);
+      for (const [key, list] of Object.entries(byCell)) {
+        const [px, py] = key.split(',').map(Number);
+        list.forEach((p, i) => {
+          parts.push(`<circle class="mf-pin${p.mine ? ' is-mine' : ''}" cx="${px * S + 12 + i * 9}" cy="${py * S + 12}" r="6" fill="${p.color}"><title>${this.esc(p.name)}</title></circle>`);
+        });
+      }
+      el.innerHTML = `<svg viewBox="0 0 ${n * S} ${n * S}">${parts.join('')}</svg>`;
     }
 
     renderParty(v) {

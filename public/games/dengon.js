@@ -70,6 +70,7 @@
               <span class="kb-phase">${title}</span>
               <span class="timer" data-ends-at="${v.endsAt}"></span>
             </div>
+            ${v.participant ? `<p class="dg-route">${v.from ? `<b>${e(v.from)}</b>さんから受け取り、` : ''}${v.to ? `<b>${e(v.to)}</b>さんへ渡します` : 'これが最後の番です'}</p>` : ''}
             <div class="dg-layout">
               <div class="dg-main" id="dg-main"></div>
               <aside class="kt-side"><section class="kt-panel" id="dg-status"></section></aside>

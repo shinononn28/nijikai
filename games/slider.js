@@ -158,6 +158,7 @@ class SliderGame {
         if (this.phase !== 'topic' || pid !== this.target || this.rerolls < 1) return;
         this.rerolls--;
         this.options = this.draw3();
+        this.seq++; // 画面を作り直させる
         break;
       case 'submit':
         this.submit(pid, payload.value);

@@ -104,7 +104,7 @@
               <div class="ok-canvas-wrap"><canvas id="ok-canvas" width="${W}" height="${H}"></canvas><div class="ok-over" id="ok-over"></div></div>
               <div id="ok-tools"></div>
             </div>
-            <aside class="kt-side"><section class="kt-panel" id="ok-score"></section></aside>
+            <aside class="kt-side"><section class="kt-panel" id="ok-judge" hidden></section><section class="kt-panel" id="ok-score"></section></aside>
           </div>
         </div>`;
       const cv = this.root.querySelector('#ok-canvas');
@@ -119,6 +119,22 @@
       this.renderTools(v);
       this.renderScore(v);
       this.renderOver(v);
+      this.renderJudge(v);
+    }
+
+    // 出題者の手動判定:言い回し違いの答えを正解にできる
+    renderJudge(v) {
+      const e = this.esc;
+      const el = this.root.querySelector('#ok-judge');
+      if (!v.guesses) {
+        el.hidden = true;
+        return;
+      }
+      el.hidden = false;
+      el.innerHTML = `
+        <h3 class="kb-sub">みんなの回答(手で正解にできます)</h3>
+        ${v.guesses.length ? `<ul class="ok-guesses">${v.guesses.map((g) => `<li><span><b>${e(g.name)}</b>「${e(g.text)}」</span><button class="btn btn-small" data-accept="${g.id}">正解にする</button></li>`).join('')}</ul>` : '<p class="kt-note">まだ回答がありません。</p>'}
+        <p class="kt-note">「ワンちゃん」と「イヌ」のような言い回し違いは、ここで正解にしてください。</p>`;
     }
 
     renderBanner(v) {
@@ -259,6 +275,7 @@
       const t = ev.target.closest('button');
       if (!t || t.disabled) return;
       if (t.dataset.choose) return this.api.send('choose', { word: t.dataset.choose });
+      if (t.dataset.accept) return this.api.send('accept', { id: t.dataset.accept });
       if (t.dataset.color) {
         this.color = t.dataset.color;
         this.eraser = false;

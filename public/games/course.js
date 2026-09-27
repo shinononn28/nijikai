@@ -3,8 +3,8 @@
 
   const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]];
   const ARROW = ['↑', '→', '↓', '←', '↗', '↘', '↙', '↖'];
-  const ICON = { wall: '🧱', pit: '🕳️', spike: '🔺', spring: '🌀', blink: '⏳', decoy: '🟫', hidden: '❓' };
-  const EVENT = { dead: '💥', wall: '🧱', spring: '🌀', endure: '🛡', goal: '🏁', stuck: '✋' };
+  const ICON = { wall: '🧱', pit: '🕳️', spike: '🌵', spring: '🌀', blink: '⏳', decoy: '🟫', eraser: '🧽', hidden: '❓' };
+  const EVENT = { dead: '💥', wall: '🧱', spring: '🌀', endure: '🛡', goal: '🏁', stuck: '✋', spike: '🌵' };
   const KEYS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
   const k = (x, y) => `${x},${y}`;
 
@@ -14,17 +14,23 @@
     let x = start.x;
     let y = start.y;
     let shield = char === 'tough' ? 1 : 0;
+    let budget = maxSteps;
     const steps = [{ x, y, t: 0 }];
     const hit = (t) => {
       const c = cells[k(x, y)];
       if (!c) return null;
-      if (c === 'pit' || c === 'spike' || (c === 'blink' && t % 2 === 0)) {
+      if (c === 'spike') {
+        if (char === 'tough') return null;
+        budget -= 3;
+        return 'spike';
+      }
+      if (c === 'pit' || (c === 'blink' && t % 2 === 0)) {
         if (shield > 0) { shield--; return 'endure'; }
         return 'dead';
       }
       return c === 'spring' ? 'spring' : null;
     };
-    for (let t = 1; t <= Math.min(plan.length, maxSteps); t++) {
+    for (let t = 1; t <= plan.length && t <= budget; t++) {
       const a = plan[t - 1];
       const [dx, dy] = DIRS[a.d];
       const len = a.jump ? 2 : 1;
@@ -48,13 +54,14 @@
         ev = hit(t);
       }
       if (ev === 'dead') return { steps: [...steps, { x, y, t, event: 'dead' }], result: 'dead' };
-      steps.push({ x, y, t, event: ev === 'endure' ? 'endure' : x === W - 1 ? 'goal' : null });
+      steps.push({ x, y, t, event: ev === 'endure' ? 'endure' : ev === 'spike' ? 'spike' : x === W - 1 ? 'goal' : null });
       if (x === W - 1) return { steps, result: 'goal', time: t };
     }
     return { steps, result: 'timeout' };
   }
 
   const RESULT = { goal: 'ゴール', dead: '脱落', wall: '壁で止まった', stuck: '行き止まり', timeout: '歩数切れ', invalid: '動けない' };
+  // (トゲで歩数が減った結果の歩数切れも「歩数切れ」になる)
 
   class CourseClient {
     constructor(root, api) {
@@ -123,7 +130,7 @@
           </div>
           <div class="cs-layout">
             <div class="cs-board-wrap"><div class="cs-board" id="cs-board" style="grid-template-columns:repeat(${v.W},1fr)"></div>
-              <p class="kt-note cs-legend">🚩スタート 🏁右端がゴール 🧱壁 🕳️落とし穴 🔺トゲ 🌀バネ ⏳点滅床(偶数歩目は穴) ❓伏せ札(点線の色は置いた人)</p></div>
+              <p class="kt-note cs-legend">🚩スタート 🏁右端がゴール 🧱壁 🕳️落とし穴(脱落) 🌵トゲ(残り歩数−3) 🌀バネ ⏳点滅床(偶数歩目は穴) ❓伏せ札(点線の色は置いた人)</p></div>
             <aside class="kt-side">
               <section class="kt-panel" id="cs-panel"></section>
               <section class="kt-panel" id="cs-score"></section>
@@ -179,7 +186,7 @@
           const c = cellAt[k(x, y)];
           const goal = x === v.W - 1;
           const start = x === v.start.x && y === v.start.y;
-          const canPlace = placing && !start && (v.myItem === 'eraser' ? !!c : !c && !goal);
+          const canPlace = placing && !start && (v.myItem === 'eraser' ? !!c && !c.hidden && !c.fresh : !c && !goal);
           const icon = c ? ICON[c.type] || '' : '';
           const blinkNote = c?.type === 'blink' ? '<small>偶</small>' : '';
           out.push(`
@@ -210,12 +217,13 @@
         return;
       }
       if (v.phase === 'pick') {
-        const my = v.picker === myId;
+        const mine = v.players.find((p) => p.id === myId);
         el.innerHTML = `
-          <h3 class="kb-sub">${my ? 'あなたの番:部品を1つ選ぶ' : `${e(this.name(v.picker))}さんが選んでいます`}</h3>
-          <div class="cs-items">${v.offer.map((o) => `
-            <button class="cs-item${o.taken ? ' is-taken' : ''}" ${my && !o.taken ? `data-item="${o.id}"` : 'disabled'}>
-              <span class="cs-item-icon">${ICON[o.type]}</span><b>${e(v.items[o.type].name)}</b><small>${o.taken ? `${e(this.name(o.taken))}が取った` : e(v.items[o.type].text)}</small></button>`).join('')}</div>`;
+          <h3 class="kb-sub">配られた部品から1つ選ぶ(ほかの人には見えません)</h3>
+          ${v.myHand ? `<div class="cs-items">${v.myHand.map((o) => `
+            <button class="cs-item${mine?.picked && v.myItem === o.type ? ' is-on' : ''}" data-item="${o.id}">
+              <span class="cs-item-icon">${ICON[o.type]}</span><b>${e(v.items[o.type].name)}</b><small>${e(v.items[o.type].text)}</small></button>`).join('')}</div>` : '<p class="kt-note">観戦中です。</p>'}
+          <p class="kt-note">全員が選んだら、点数の低い人から順に置いていきます。選び直しは締め切りまで何度でも。</p>`;
         return;
       }
       if (v.phase === 'place') {
@@ -223,7 +231,7 @@
         const it = v.myItem ? v.items[v.myItem] : null;
         el.innerHTML = my
           ? `<h3 class="kb-sub">あなたの番:${ICON[v.myItem]} ${e(it.name)}を置く</h3>
-             <p class="kt-note">${v.myItem === 'eraser' ? '消したい部品のマスをタップ' : '光っているマスをタップして置きます'}</p>
+             <p class="kt-note">${v.myItem === 'eraser' ? '消したい部品のマスをタップ(消せるのは、前のラウンドまでに表向きで置かれた部品だけ)' : '光っているマスをタップして置きます'}</p>
              ${v.myItem !== 'eraser' ? `<label class="cs-hide"><input type="checkbox" data-hide ${this.hideItem ? 'checked' : ''}> 伏せて置く(ほかの人には「❓」に見える)</label>` : ''}`
           : `<h3 class="kb-sub">${e(this.name(v.placer))}さんが部品を置いています</h3>`;
         return;
@@ -269,7 +277,7 @@
         <h3 class="kb-sub">得点(${v.target}点で勝利)</h3>
         <ul class="kt-team">${[...v.players].sort((a, b) => b.score - a.score).map((p) => `
           <li><i class="dot" style="background:${p.color}"></i><span class="player-name">${e(p.name)}</span>
-            <span class="kt-tickets">${p.char ? e(v.chars[p.char].name) : ''}${p.item ? `・${ICON[p.item]}` : ''}${p.planned === null ? '' : p.planned ? '・決定' : '・計画中'}</span><b>${p.score}</b></li>`).join('')}</ul>`;
+            <span class="kt-tickets">${p.char ? e(v.chars[p.char].name) : ''}${p.picked === null ? '' : p.picked ? '・選んだ' : '・選び中'}${p.planned === null ? '' : p.planned ? '・決定' : '・計画中'}</span><b>${p.score}</b></li>`).join('')}</ul>`;
     }
 
     name(id) {

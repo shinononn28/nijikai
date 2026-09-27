@@ -115,9 +115,11 @@
           const owner = s.owner ? v.players.find((p) => p.id === s.owner) : null;
           const tokens = (tokenAt[s.i] || []).map((p) => `<i class="jn-tok${p.id === me ? ' is-me' : ''}" style="background:${p.color}" title="${e(p.name)}"></i>`).join('');
           const icon = { start: '🏁', chance: '❓', park: '🌳', rest: '☕', tax: '🏛' }[s.t] || '';
+          const mine = owner && owner.id === me;
           return `
-            <div class="jn-cell jn-${s.t}${owner ? ' is-owned' : ''}${s.full ? ' is-full' : ''}" style="grid-column:${c + 1};grid-row:${r + 1};${owner ? `--oc:${owner.color}` : ''}" data-space="${s.i}">
+            <div class="jn-cell jn-${s.t}${owner ? ' is-owned' : ''}${mine ? ' is-mine' : ''}${s.full ? ' is-full' : ''}" style="grid-column:${c + 1};grid-row:${r + 1};${owner ? `--oc:${owner.color}` : ''}" data-space="${s.i}">
               ${s.group ? `<span class="jn-band" style="background:${s.group.color}"></span>` : ''}
+              ${owner ? `<span class="jn-owner" title="${e(owner.name)}の土地">${mine ? '自分' : e([...owner.name][0])}</span>` : ''}
               <span class="jn-name">${icon}${e(s.name)}</span>
               ${s.t === 'prop' ? `<span class="jn-price">${owner ? `通行料${s.rent}` : `${s.price}`}</span>` : ''}
               ${s.houses ? `<span class="jn-houses">${'🏠'.repeat(s.houses)}</span>` : ''}
