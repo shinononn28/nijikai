@@ -1,5 +1,5 @@
 /* 二枚舌の酒場 ― ゲームエンジン（サーバーとブラウザで共通）
-   二次会卓向けの変更: stop() を追加、チャットのログに生のテキスト(name/text)を追加 */
+   二次会卓向けの変更: stop()・extend() を追加、チャットのログに生のテキスト(name/text)を追加 */
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.NimaiEngine=factory()})(typeof self!=='undefined'?self:this,function(){
 'use strict';
 const TEAM={red:'赤',blue:'青',rogue:'詐欺師'};
@@ -512,8 +512,12 @@ function createGame(opts){
       await accusation();
     }catch(e){console.error(e);sys('エラーが起きた：'+e.message)}
   }
+  // 二次会卓向け:手番の締め切りを延ばす(カードの対象選びなどで時間切れにならないように)
+  // add=true なら今の締め切りに ms を足す、false なら「残りが最低 ms」になるよう延ばす
+  function extend(pid,ms,kind,add){const pd=G.pending[String(pid)];if(!pd||!pd.deadline||(kind&&pd.kind!==kind))return false;
+    const nd=add?Math.max(pd.deadline,Date.now())+ms:Math.max(pd.deadline,Date.now()+ms);clearTimeout(pd.t);pd.deadline=nd;pd.t=setTimeout(()=>pd.fin(null),nd-Date.now());sync();return true}
   function stop(){stopped=true;Object.values(G.pending).forEach(pd=>clearTimeout(pd.t));G.pending={};clearTimeout(stTimer)}
-  return{start,stop,respond,action,chat,dm,setConnected,pause:d=>{paused=Math.max(0,paused+d)},view:pid=>{const p=byId(pid);return p?view(p):null},isOver:()=>G.over};
+  return{start,stop,extend,respond,action,chat,dm,setConnected,pause:d=>{paused=Math.max(0,paused+d)},view:pid=>{const p=byId(pid);return p?view(p):null},isOver:()=>G.over};
 }
 return{createGame,CARDS,TEAM,dieHTML,esc};
 });

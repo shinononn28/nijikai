@@ -14,6 +14,7 @@ class NimaijitaGame {
     this.stopped = false;
     this.relaying = false;
     this.updateTimer = null;
+    this.holds = {};
     this.game = engineLib.createGame({
       humans: this.ids.map((id) => ({ id, name: ctx.nameOf(id) })),
       total: Math.max(s.n, this.ids.length),
@@ -70,7 +71,16 @@ class NimaijitaGame {
   action(pid, type, payload, { isHost }) {
     if (!this.ids.includes(pid)) return;
     if (type === 'respond') this.game.respond(pid, payload.kind, payload.value);
-    else if (type === 'card') this.game.action(pid, { ...payload, type: 'card' });
+    else if (type === 'card') {
+      this.game.action(pid, { ...payload, type: 'card' });
+      // 自分の手番中にカードを使ったら、結果を見てから宣言できるよう手番の時間を足す
+      this.game.extend(pid, 25000, 'turn');
+    } else if (type === 'hold') {
+      // カードの画面を開いた(対象選び中):手番の時間を30秒足す(1回の手番で2回まで)
+      const key = `${pid}:${this.game.view(pid)?.prompt?.id}`;
+      this.holds[key] = (this.holds[key] || 0) + 1;
+      if (this.holds[key] <= 2) this.game.extend(pid, 30000, 'turn', true);
+    }
     else if (type === 'dm') this.game.dm(pid, payload);
     else if (type === 'finish' && isHost && this.game.isOver()) this.ctx.finish();
   }

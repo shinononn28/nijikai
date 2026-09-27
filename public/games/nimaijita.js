@@ -16,7 +16,7 @@ const $=s=>sr.querySelector(s);
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 
 let lastSheet=null,S=null;
-const net={send(t,p){if(t==='respond')api.send('respond',p);else if(t==='action')api.send('card',p);else if(t==='dm')api.send('dm',p)}};
+const net={send(t,p){if(t==='respond')api.send('respond',p);else if(t==='action')api.send('card',p);else if(t==='dm')api.send('dm',p);else if(t==='hold')api.send('hold',{})}};
 let marks={},sel={c:1,f:1},opened=new Set(),sheetOpen=0,lastDoubt=null,resultShown=false,promptSheet=null,mitsu=null,lobbyW=null,readySent=null;
 
 /* ---------- sheets ---------- */
@@ -164,6 +164,7 @@ sr.addEventListener('click',e=>{
 });
 async function useCard(i){
   if(!canUseCards())return;const c=S.me.cards[i],d=CARDS[c.type];if(!cardReady(c))return;
+  if(myTurn())net.send('hold'); // 対象を選んでいる間に手番の時間が切れないように
   const others=S.order.filter(p=>p.id!==S.you);let payload={type:'card',ci:i,targets:[]};
   if(d.n>0){const t=await pickPlayers(`${d.name}（${d.desc}）：${d.n===1?'1人':'2人'}選ぶ`,others,d.n);if(!t)return;payload.targets=t}
   else if(d.die){const r=await diePicker(`${d.name}：変えるダイスと目を選ぶ`,1);if(!r)return;payload.i=r[0].i;payload.face=r[0].face}
