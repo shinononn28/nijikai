@@ -3,28 +3,10 @@
 // そのあと全員が経路を計画して一斉にスタート。ゴールした人に得点、ただし全員ゴールしたら誰も得点なし。
 // キャラクターごとに動き方が違うので「自分は通れて相手は通れない」コースを作れる。
 
-const W = 12;
-const H = 7;
-const START = { x: 0, y: 3 };
-const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]]; // 上右下左・右上右下左下左上
+const { W, H, START, CHARS, ITEMS, simulate, key, inside } = require('../public/games/course-sim.js');
 
-const CHARS = {
-  jumper: { name: 'ジャンパー', text: '縦横に2マス跳べる(間のマスは無視)' },
-  diag: { name: 'ナナメ', text: '斜めにも進める' },
-  tough: { name: 'タフ', text: '落とし穴・点滅床を1回だけ耐え、トゲは効かない' },
-  runner: { name: '健脚', text: '歩数が3多い' },
-};
-const ITEMS = {
-  wall: { name: '壁', text: '通れない(ジャンパーは跳び越せる)' },
-  pit: { name: '落とし穴', text: '踏んだら脱落(タフは1回だけ耐える)' },
-  spike: { name: 'トゲ', text: '踏むと残り歩数が3減る(タフは平気)' },
-  spring: { name: 'バネ', text: '踏むと同じ向きに2マス飛ばされる' },
-  blink: { name: '点滅床', text: '偶数歩目は穴になる' },
-  decoy: { name: '見せかけ', text: 'ただの床。伏せて置くと罠に見える' },
-  eraser: { name: '消しゴム', text: '前のラウンドまでに表向きで置かれた部品を1つ消す' },
-};
 // 部品の出やすさ(消しゴムは少人数だと強すぎるので出にくく、1人の手札に1つまで)
-const ITEM_WEIGHTS = { wall: 3, pit: 3, spike: 3, spring: 2, blink: 2, decoy: 2, eraser: 1 };
+const ITEM_WEIGHTS = { wall: 3, pit: 2, spike: 2, spring: 2, blink: 2, ice: 2, conveyor: 2, oneway: 2, trapdoor: 2, decoy: 2, eraser: 1 };
 const HAND = 3; // 各自に配られる部品の候補数
 const BASE_STEPS = 12;
 const COLORS = ['#c8323c', '#2f6fb0', '#2f8a5a', '#c7801f', '#7a4fb0', '#2f9fa8'];
@@ -39,80 +21,7 @@ function shuffle(arr) {
   }
   return a;
 }
-const key = (x, y) => `${x},${y}`;
-const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
 const isGoal = (x) => x === W - 1;
-
-// 経路の実行(サーバーの本番と、画面の予想の両方で使う同じ手順)
-// cells: key → {type} / plan: [{d, jump}] / 戻り値:{steps:[{x,y,t,event}], result, killer}
-function simulate(cells, plan, char, maxSteps) {
-  let x = START.x;
-  let y = START.y;
-  let shield = char === 'tough' ? 1 : 0;
-  let budget = maxSteps;
-  const steps = [{ x, y, t: 0 }];
-  const triggered = [];
-  const hit = (cell, t) => {
-    const c = cells[key(cell.x, cell.y)];
-    if (!c) return null;
-    const type = c.type;
-    if (type === 'spike') {
-      triggered.push(key(cell.x, cell.y));
-      if (char === 'tough') return null;
-      budget -= 3;
-      return 'spike';
-    }
-    if (type === 'pit' || (type === 'blink' && t % 2 === 0)) {
-      triggered.push(key(cell.x, cell.y));
-      if (shield > 0) {
-        shield--;
-        return 'endure';
-      }
-      return 'dead';
-    }
-    if (type === 'spring' || type === 'decoy') triggered.push(key(cell.x, cell.y));
-    return type === 'spring' ? 'spring' : null;
-  };
-  for (let t = 1; t <= plan.length && t <= budget; t++) {
-    const a = plan[t - 1];
-    const [dx, dy] = DIRS[a.d] || [0, 0];
-    if (a.d >= 4 && char !== 'diag') return { steps, result: 'invalid', triggered };
-    if (a.jump && (char !== 'jumper' || a.d >= 4)) return { steps, result: 'invalid', triggered };
-    const len = a.jump ? 2 : 1;
-    let nx = x + dx * len;
-    let ny = y + dy * len;
-    if (!inside(nx, ny)) return { steps: [...steps, { x, y, t, event: 'stuck' }], result: 'stuck', triggered };
-    let c = cells[key(nx, ny)];
-    if (c && c.type === 'wall') {
-      triggered.push(key(nx, ny));
-      return { steps: [...steps, { x, y, t, event: 'wall', at: key(nx, ny) }], result: 'wall', killerCell: key(nx, ny), triggered };
-    }
-    x = nx;
-    y = ny;
-    let ev = hit({ x, y }, t);
-    // バネ:同じ向きに2マス飛ばされる(壁の手前で止まる)
-    let bounces = 0;
-    while (ev === 'spring' && bounces++ < 3) {
-      steps.push({ x, y, t, event: 'spring' });
-      let tx = x;
-      let ty = y;
-      for (let k = 0; k < 2; k++) {
-        const qx = tx + dx;
-        const qy = ty + dy;
-        if (!inside(qx, qy) || cells[key(qx, qy)]?.type === 'wall') break;
-        tx = qx;
-        ty = qy;
-      }
-      x = tx;
-      y = ty;
-      ev = hit({ x, y }, t);
-    }
-    if (ev === 'dead') return { steps: [...steps, { x, y, t, event: 'dead' }], result: 'dead', killerCell: key(x, y), triggered };
-    steps.push({ x, y, t, event: ev === 'endure' ? 'endure' : ev === 'spike' ? 'spike' : isGoal(x) ? 'goal' : null });
-    if (isGoal(x)) return { steps, result: 'goal', time: t, triggered };
-  }
-  return { steps, result: 'timeout', triggered };
-}
 
 class CourseGame {
   constructor(ctx, settings, humanIds) {
@@ -133,10 +42,12 @@ class CourseGame {
     this.hands = {};
     this.history = [];
     this.seq = 0;
+    // キャラクターはランダムに1人1種類ずつ(選べると「最強キャラ」に偏るため)
+    const chars = shuffle(Object.keys(CHARS));
+    this.players.forEach((p, i) => { p.char = chars[i % chars.length]; });
+    this.ctx.system(`キャラクター:${this.players.map((p) => `${this.name(p.id)}=${CHARS[p.char].name}`).join('、')}`);
     this.phase = 'chars';
-    this.endsAt = Date.now() + 40000;
-    this.later(40000, () => this.startRound());
-    this.ctx.system('キャラクターを選んでください。部品を置いてコースを作り、自分だけがゴールできるコースを狙います');
+    this.startRound();
   }
 
   // ---------- 共通 ----------
@@ -232,7 +143,7 @@ class CourseGame {
     this.ctx.update();
   }
 
-  place(pid, x, y, hidden) {
+  place(pid, x, y, hidden, dir = 1) {
     if (this.phase !== 'place' || pid !== this.placer || !inside(x, y)) return;
     const type = this.picks[pid];
     const k = key(x, y);
@@ -245,7 +156,7 @@ class CourseGame {
       this.ctx.system(`${this.name(pid)}さんが消しゴムで部品を1つ消した`);
     } else {
       if (this.cells[k] || isGoal(x)) return;
-      this.cells[k] = { type, owner: pid, hidden: !!hidden, round: this.round };
+      this.cells[k] = { type, owner: pid, hidden: !!hidden, round: this.round, dir: ITEMS[type].dir ? [0, 1, 2, 3].includes(dir) ? dir : 1 : undefined };
       this.ctx.system(`${this.name(pid)}さんが${hidden ? '何かを伏せて' : `${ITEMS[type].name}を`}置いた`);
     }
     this.orderIndex++;
@@ -276,7 +187,7 @@ class CourseGame {
   startRun() {
     if (this.phase !== 'plan') return;
     this.clearTimers();
-    const cellsTrue = Object.fromEntries(Object.entries(this.cells).map(([k, c]) => [k, { type: c.type }]));
+    const cellsTrue = Object.fromEntries(Object.entries(this.cells).map(([k, c]) => [k, { type: c.type, dir: c.dir }]));
     const runs = {};
     for (const p of this.players) {
       const plan = this.plans[p.id]?.plan || [];
@@ -340,16 +251,11 @@ class CourseGame {
   action(pid, type, payload, { isHost }) {
     const p = this.p(pid);
     switch (type) {
-      case 'char':
-        if (this.phase !== 'chars' || !p || !CHARS[payload.char]) return;
-        p.char = payload.char;
-        if (this.players.every((x) => x.char || !this.active(x.id))) this.startRound();
-        break;
       case 'pickItem':
         this.pickItem(pid, String(payload.id));
         break;
       case 'place':
-        this.place(pid, Number(payload.x), Number(payload.y), !!payload.hidden);
+        this.place(pid, Number(payload.x), Number(payload.y), !!payload.hidden, Number(payload.dir));
         break;
       case 'plan':
         this.setPlan(pid, payload.plan, payload.ready);
@@ -391,7 +297,7 @@ class CourseGame {
       const [x, y] = k.split(',').map(Number);
       const mine = c.owner === pid;
       const shown = !c.hidden || mine || this.phase === 'ended';
-      return { x, y, type: shown ? c.type : 'hidden', hidden: c.hidden, owner: c.owner, ownerColor: this.p(c.owner)?.color || null, fresh: c.round === this.round };
+      return { x, y, type: shown ? c.type : 'hidden', dir: shown ? c.dir : undefined, hidden: c.hidden, owner: c.owner, ownerColor: this.p(c.owner)?.color || null, fresh: c.round === this.round };
     });
     return {
       phase: this.phase,
@@ -431,15 +337,16 @@ module.exports = {
   tagline: '部品を置いてコースを作り、自分だけがゴールできるコースを狙う。',
   description:
     '毎ラウンド部品を1つ選んでコースに置き(伏せて置くと中身は本人しか知らない)、全員が経路を計画して一斉にスタート。' +
-    'ゴールした人に得点、ただし全員ゴールしたら誰も得点なし。部品はこっそり選ぶので、伏せて置けば中身は本人にしかわかりません。キャラクターごとに動き方も違います。',
+    'ゴールした人に得点、ただし全員ゴールしたら誰も得点なし。部品はこっそり選ぶので、伏せて置けば中身は本人にしかわかりません。キャラクターは8種類からランダムに1人1種類で、動き方や罠への強さが違います。',
   minPlayers: 2,
   maxPlayers: 6,
   cpu: false,
+  client: ['course-sim.js', 'course.js'], // 経路計算は画面と共通
   settings: [
     { key: 'target', label: '目標点', default: 12, options: [8, 12, 16].map((n) => ({ value: n, label: `${n}点` })) },
     { key: 'maxRounds', label: '最大ラウンド', default: 10, options: [6, 10, 14].map((n) => ({ value: n, label: `${n}ラウンド` })) },
     { key: 'planSeconds', label: '計画の時間', default: 90, options: [60, 90, 120].map((n) => ({ value: n, label: `${n}秒` })) },
   ],
   create: (ctx, settings, playerIds) => new CourseGame(ctx, settings, playerIds),
-  _internal: { simulate, DIRS, W, H, START },
+  _internal: { simulate, W, H, START },
 };

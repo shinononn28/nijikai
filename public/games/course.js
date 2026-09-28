@@ -1,64 +1,15 @@
 (() => {
   'use strict';
 
-  const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]];
+  const { DIRS, simulate: sim } = window.CourseSim;
   const ARROW = ['↑', '→', '↓', '←', '↗', '↘', '↙', '↖'];
-  const ICON = { wall: '🧱', pit: '🕳️', spike: '🌵', spring: '🌀', blink: '⏳', decoy: '🟫', eraser: '🧽', hidden: '❓' };
-  const EVENT = { dead: '💥', wall: '🧱', spring: '🌀', endure: '🛡', goal: '🏁', stuck: '✋', spike: '🌵' };
+  const BELT = ['⏫', '⏩', '⏬', '⏪'];
+  const ONEWAY = ['⇧', '⇨', '⇩', '⇦'];
+  const ICON = { wall: '🧱', pit: '🕳️', spike: '🌵', spring: '🌀', blink: '⏳', ice: '🧊', conveyor: '⏩', oneway: '⇨', trapdoor: '🚪', decoy: '🟫', eraser: '🧽', hidden: '❓' };
+  const iconOf = (c) => (c.type === 'conveyor' ? BELT[c.dir ?? 1] : c.type === 'oneway' ? ONEWAY[c.dir ?? 1] : ICON[c.type] || '');
+  const EVENT = { dead: '💥', wall: '🧱', spring: '🌀', endure: '🛡', goal: '🏁', stuck: '✋', spike: '🌵', slide: '🧊', conveyor: '⏩', trapdoor: '🚪' };
   const KEYS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
   const k = (x, y) => `${x},${y}`;
-
-  // サーバーと同じ手順で経路を予想する(伏せ札はただの床とみなす)
-  function simulate(cells, plan, char, maxSteps, W, H, start) {
-    const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
-    let x = start.x;
-    let y = start.y;
-    let shield = char === 'tough' ? 1 : 0;
-    let budget = maxSteps;
-    const steps = [{ x, y, t: 0 }];
-    const hit = (t) => {
-      const c = cells[k(x, y)];
-      if (!c) return null;
-      if (c === 'spike') {
-        if (char === 'tough') return null;
-        budget -= 3;
-        return 'spike';
-      }
-      if (c === 'pit' || (c === 'blink' && t % 2 === 0)) {
-        if (shield > 0) { shield--; return 'endure'; }
-        return 'dead';
-      }
-      return c === 'spring' ? 'spring' : null;
-    };
-    for (let t = 1; t <= plan.length && t <= budget; t++) {
-      const a = plan[t - 1];
-      const [dx, dy] = DIRS[a.d];
-      const len = a.jump ? 2 : 1;
-      const nx = x + dx * len;
-      const ny = y + dy * len;
-      if (!inside(nx, ny)) return { steps: [...steps, { x, y, t, event: 'stuck' }], result: 'stuck' };
-      if (cells[k(nx, ny)] === 'wall') return { steps: [...steps, { x, y, t, event: 'wall' }], result: 'wall' };
-      x = nx;
-      y = ny;
-      let ev = hit(t);
-      let b = 0;
-      while (ev === 'spring' && b++ < 3) {
-        steps.push({ x, y, t, event: 'spring' });
-        for (let i = 0; i < 2; i++) {
-          const qx = x + dx;
-          const qy = y + dy;
-          if (!inside(qx, qy) || cells[k(qx, qy)] === 'wall') break;
-          x = qx;
-          y = qy;
-        }
-        ev = hit(t);
-      }
-      if (ev === 'dead') return { steps: [...steps, { x, y, t, event: 'dead' }], result: 'dead' };
-      steps.push({ x, y, t, event: ev === 'endure' ? 'endure' : ev === 'spike' ? 'spike' : x === W - 1 ? 'goal' : null });
-      if (x === W - 1) return { steps, result: 'goal', time: t };
-    }
-    return { steps, result: 'timeout' };
-  }
 
   const RESULT = { goal: 'ゴール', dead: '脱落', wall: '壁で止まった', stuck: '行き止まり', timeout: '歩数切れ', invalid: '動けない' };
   // (トゲで歩数が減った結果の歩数切れも「歩数切れ」になる)
@@ -124,13 +75,13 @@
       this.root.innerHTML = `
         <div class="kb cs">
           <div class="kb-head">
-            <span class="kb-round">${v.phase === 'chars' ? 'キャラクター選び' : v.phase === 'ended' ? '終了' : `ラウンド ${v.round}`}</span>
+            <span class="kb-round">${v.phase === 'ended' ? '終了' : `ラウンド ${v.round}`}</span>
             <span class="kb-phase">${{ chars: '', pick: '部品を選ぶ', place: '部品を置く', plan: '経路を計画', result: '結果', ended: '' }[v.phase] || ''}</span>
             ${v.endsAt ? `<span class="timer" data-ends-at="${v.endsAt}"></span>` : ''}
           </div>
           <div class="cs-layout">
             <div class="cs-board-wrap"><div class="cs-board" id="cs-board" style="grid-template-columns:repeat(${v.W},1fr)"></div>
-              <p class="kt-note cs-legend">🚩スタート 🏁右端がゴール 🧱壁 🕳️落とし穴(脱落) 🌵トゲ(残り歩数−3) 🌀バネ ⏳点滅床(偶数歩目は穴) ❓伏せ札(点線の色は置いた人)</p></div>
+              <p class="kt-note cs-legend">🚩スタート 🏁右端がゴール 🧱壁 🕳️落とし穴(脱落) 🌵トゲ(残り歩数−3) 🌀バネ(2マス飛ぶ) ⏳点滅床(偶数歩目は穴) 🧊氷(滑る) ⏩ベルトコンベア(矢印へ1マス) ⇨一方通行(矢印の向きだけ) 🚪落とし戸(スタートへ) ❓伏せ札(点線の色は置いた人)</p></div>
             <aside class="kt-side">
               <section class="kt-panel" id="cs-panel"></section>
               <section class="kt-panel" id="cs-score"></section>
@@ -148,14 +99,14 @@
     // ---------- 盤 ----------
     knownCells(v) {
       const m = {};
-      for (const c of v.cells) if (c.type !== 'hidden' && c.type !== 'decoy') m[k(c.x, c.y)] = c.type;
+      for (const c of v.cells) if (c.type !== 'hidden' && c.type !== 'decoy') m[k(c.x, c.y)] = { type: c.type, dir: c.dir };
       return m;
     }
 
     preview(v) {
       const me = this.me();
       if (!me) return null;
-      return simulate(this.knownCells(v), this.plan, me.char, me.steps, v.W, v.H, v.start);
+      return sim(this.knownCells(v), this.plan, me.char, me.steps);
     }
 
     renderBoard(v) {
@@ -187,7 +138,7 @@
           const goal = x === v.W - 1;
           const start = x === v.start.x && y === v.start.y;
           const canPlace = placing && !start && (v.myItem === 'eraser' ? !!c && !c.hidden && !c.fresh : !c && !goal);
-          const icon = c ? ICON[c.type] || '' : '';
+          const icon = c ? iconOf(c) : '';
           const blinkNote = c?.type === 'blink' ? '<small>偶</small>' : '';
           out.push(`
             <div class="cs-cell${goal ? ' is-goal' : ''}${start ? ' is-start' : ''}${c?.hidden ? ' is-hidden' : ''}${canPlace ? ' is-placeable' : ''}"
@@ -208,17 +159,10 @@
       const el = this.root.querySelector('#cs-panel');
       const me = this.me();
       const myId = this.api.myId();
-      if (v.phase === 'chars') {
-        el.innerHTML = `
-          <h3 class="kb-sub">キャラクターを選ぶ</h3>
-          <div class="cs-chars">${Object.entries(v.chars).map(([id, c]) => `
-            <button class="cs-char${me?.char === id ? ' is-on' : ''}" data-char="${id}"><b>${e(c.name)}</b><small>${e(c.text)}</small></button>`).join('')}</div>
-          <p class="kt-note">全員が選ぶか、時間が来たら始まります。同じキャラを選んでも構いません。</p>`;
-        return;
-      }
       if (v.phase === 'pick') {
         const mine = v.players.find((p) => p.id === myId);
         el.innerHTML = `
+          ${mine ? `<p class="cs-mychar">あなたは<b>${e(v.chars[mine.char].name)}</b>:${e(v.chars[mine.char].text)}</p>` : ''}
           <h3 class="kb-sub">配られた部品から1つ選ぶ(ほかの人には見えません)</h3>
           ${v.myHand ? `<div class="cs-items">${v.myHand.map((o) => `
             <button class="cs-item${mine?.picked && v.myItem === o.type ? ' is-on' : ''}" data-item="${o.id}">
@@ -232,6 +176,7 @@
         el.innerHTML = my
           ? `<h3 class="kb-sub">あなたの番:${ICON[v.myItem]} ${e(it.name)}を置く</h3>
              <p class="kt-note">${v.myItem === 'eraser' ? '消したい部品のマスをタップ(消せるのは、前のラウンドまでに表向きで置かれた部品だけ)' : '光っているマスをタップして置きます'}</p>
+             ${v.items[v.myItem].dir ? `<div class="cs-dirs"><span>向き</span>${[3, 0, 2, 1].map((d) => `<button class="btn btn-small${(this.placeDir ?? 1) === d ? ' btn-primary' : ''}" data-pdir="${d}">${ARROW[d]}</button>`).join('')}</div>` : ''}
              ${v.myItem !== 'eraser' ? `<label class="cs-hide"><input type="checkbox" data-hide ${this.hideItem ? 'checked' : ''}> 伏せて置く(ほかの人には「❓」に見える)</label>` : ''}`
           : `<h3 class="kb-sub">${e(this.name(v.placer))}さんが部品を置いています</h3>`;
         return;
@@ -306,18 +251,22 @@
     }
 
     onClick(ev) {
-      const t = ev.target.closest('[data-char],[data-item],[data-place],[data-move],[data-jump],[data-act],[data-hide]');
+      const t = ev.target.closest('[data-item],[data-place],[data-move],[data-jump],[data-act],[data-hide],[data-pdir]');
       if (!t || t.disabled) return;
       if (t.dataset.hide !== undefined) {
         this.hideItem = t.checked;
         return;
       }
-      if (t.dataset.char) return this.api.send('char', { char: t.dataset.char });
+      if (t.dataset.pdir !== undefined) {
+        this.placeDir = Number(t.dataset.pdir);
+        return this.renderPanel(this.v);
+      }
       if (t.dataset.item) return this.api.send('pickItem', { id: t.dataset.item });
       if (t.dataset.place) {
         const [x, y] = t.dataset.place.split(',').map(Number);
-        this.api.send('place', { x, y, hidden: this.hideItem });
+        this.api.send('place', { x, y, hidden: this.hideItem, dir: this.placeDir ?? 1 });
         this.hideItem = false;
+        this.placeDir = 1;
         return;
       }
       if (t.dataset.move) return this.add(Number(t.dataset.move), false);
