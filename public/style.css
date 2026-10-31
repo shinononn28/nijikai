@@ -1180,3 +1180,62 @@ th:not(:first-child) { text-align: right; }
 
 .cs-mychar { background: #fff5dc; border-radius: var(--radius-ctl); padding: 0.4rem 0.6rem; font-size: 0.88rem; }
 .cs-dirs { display: flex; align-items: center; gap: 0.3rem; font-weight: 700; }
+
+/* ---------- 早押しクイズ ---------- */
+.hy-card { background: var(--card); color: var(--ink); border-radius: var(--radius-card); padding: 1rem 1.2rem 1.3rem; display: grid; gap: 0.5rem; min-height: 9rem; }
+.hy-meta { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
+.hy-meta .timer { color: var(--ink); font-size: 0.85rem; padding: 0 0.3em; }
+.hy-text { font-size: 1.35rem; line-height: 1.7; font-weight: 700; word-break: break-all; min-height: 2.4em; }
+.hy-rest { color: var(--muted); font-weight: 500; }
+.hy-ready { color: var(--muted); animation: hy-blink 0.8s steps(2) infinite; }
+.hy-caret { display: inline-block; width: 0.5em; height: 1.1em; vertical-align: -0.15em; background: var(--brass); margin-left: 2px; animation: hy-blink 0.6s steps(2) infinite; }
+.hy-slash { font-weight: 900; margin: 0 0.1em; }
+.hy-slash.is-ng { color: var(--red); }
+.hy-slash.is-ok, .hy-slash.is-now { color: var(--good); }
+@keyframes hy-blink { 50% { opacity: 0; } }
+#hy-act { margin-top: 1rem; }
+.hy-buzz {
+  appearance: none; display: grid; place-items: center; gap: 0.2rem; width: 100%; min-height: 7rem;
+  border: 3px solid var(--red-deep); border-radius: 999px; background: var(--red); color: #fff;
+  font-family: var(--font-display); font-size: 2rem; cursor: pointer; box-shadow: 0 6px 0 var(--red-deep);
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.hy-buzz small { font-family: var(--font-body); font-size: 0.75rem; opacity: 0.85; }
+.hy-buzz:active:not(:disabled) { transform: translateY(6px); box-shadow: 0 0 0 var(--red-deep); }
+.hy-buzz.is-pressed { background: var(--brass); border-color: var(--brass); color: var(--ink); box-shadow: none; transform: translateY(6px); font-size: 1.4rem; }
+.hy-buzz.is-off { background: transparent; border-color: var(--felt-muted); color: var(--felt-muted); box-shadow: none; font-size: 1rem; cursor: default; }
+.hy-qctl { margin-top: 0.6rem; }
+.hy-qctl .kt-note, .hy-qctl .btn-quiet { color: var(--felt-muted); }
+.hy-answering .join-row input { min-width: 0; text-transform: none; letter-spacing: normal; }
+.hy-you { font-weight: 700; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; }
+.hy-margin { font-size: 0.8rem; color: var(--muted); font-weight: 500; }
+.hy-given { font-size: 1.3rem; font-weight: 700; }
+.hy-answer-line b { font-size: 1.3rem; }
+.hy-winner { font-weight: 700; color: var(--good); }
+.hy-attempts { display: grid; gap: 0.3rem; }
+.hy-attempts li { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.hy-attempts .is-ng > span:first-child { color: var(--red); font-weight: 700; }
+.hy-attempts .is-ok > span:first-child { color: var(--good); font-weight: 700; }
+.hy-write textarea { width: 100%; padding: 0.5em; border: 2px solid var(--line); border-radius: var(--radius-ctl); background: #fff; color: var(--ink); resize: vertical; }
+.hy-write input { width: 100%; }
+.hy-log { display: grid; gap: 0.5rem; padding-left: 0; }
+.hy-is-answerer .player-name { color: var(--red); }
+.hy-wait { text-align: center; }
+
+/* ---------- フェイント早押し ---------- */
+.hs-rule { text-align: center; font-size: 1.25rem; font-weight: 700; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 0.15em; }
+.hs-rule-face { font-size: 1.6rem; padding: 0 0.15em; background: var(--card); border-radius: 6px; line-height: 1.3; }
+.hs-pad {
+  appearance: none; border: 0; padding: 0; background: none; color: inherit; cursor: pointer; display: grid; justify-items: center; gap: 0.5rem;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.hs-card {
+  width: min(16rem, 70vw); aspect-ratio: 3 / 4; display: grid; place-items: center; background: var(--card); color: var(--ink);
+  border-radius: 18px; box-shadow: 0 8px 0 rgba(0, 0, 0, 0.25); font-size: 5.5rem; line-height: 1; border: 4px solid transparent;
+}
+.hs-card .hs-face.is-kanji { font-family: var(--font-display); }
+.hs-card.is-hit { border-color: var(--brass); }
+.hs-pad.is-done .hs-card { opacity: 0.75; }
+.hs-ready { font-size: 1.4rem; color: var(--muted); }
+.hs-status { min-height: 1.6em; font-weight: 700; color: var(--brass); }
+.hs-help { text-align: center; color: var(--felt-muted); }

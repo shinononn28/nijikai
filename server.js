@@ -21,7 +21,8 @@ app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => re
 app.get('/healthz', (_req, res) => res.send('ok'));
 
 const server = http.createServer(app);
-const io = new Server(server, { pingInterval: 20000, pingTimeout: 20000 });
+// 1KB を超える送信だけ圧縮する(盤面の大きいゲームの状態など)。小さい送信は圧縮しないほうが速い
+const io = new Server(server, { pingInterval: 20000, pingTimeout: 20000, perMessageDeflate: { threshold: 1024 } });
 
 /** @type {Map<string, any>} */
 const rooms = new Map();
@@ -42,6 +43,7 @@ function minPlayersOf(game) {
   return DEV_MIN_PLAYERS ?? game.minPlayers;
 }
 
+// ゲーム一覧は変わらないので、入室時に1回だけ送る(room:state には入れない)
 const publicCatalog = () =>
   catalog.map((g) => ({
     id: g.id,
@@ -55,6 +57,7 @@ const publicCatalog = () =>
     client: g.comingSoon ? [] : g.client || [`${g.id}.js`], // public/games/ の画面ファイル(この順に読み込む)
     settings: g.settings || [],
   }));
+const PUBLIC_CATALOG = publicCatalog();
 
 function defaultSettings(gameId) {
   const g = getGame(gameId);
@@ -85,6 +88,8 @@ function createRoom() {
     settings: defaultSettings(first.id),
     game: null,
     gameId: null,
+    gameSeq: 0,
+    viewsQueued: false,
     emptySince: null,
   };
   rooms.set(code, room);
@@ -125,7 +130,6 @@ function roomState(room) {
     maxPlayers: MAX_PLAYERS,
     selectedGame: room.selectedGame,
     settings: room.settings,
-    catalog: publicCatalog(),
     build: BUILD,
     playing: !!room.game,
     playingGameId: room.gameId,
@@ -134,13 +138,62 @@ function roomState(room) {
 
 const sendRoomState = (room) => io.to(room.code).emit('room:state', roomState(room));
 
-function sendGameViews(room) {
-  for (const p of room.players.values()) {
-    if (!p.socketId) continue;
-    const view = room.game ? room.game.view(p.id) : null;
-    io.to(p.socketId).emit('game:view', view ? { ...view, gameId: room.gameId, serverNow: Date.now() } : null);
-    io.to(p.socketId).emit('chat:channels', room.game?.chatChannels?.(p.id) || DEFAULT_CHANNELS);
+// ゲームの状態は、前回その人に送ったものとの差分(変わった項目だけ)を送る。
+// 新しいゲームの開始・再接続のときだけ全部を送る。何も変わっていなければ送らない。
+function sendViewTo(room, p, force = false) {
+  if (!p.socketId) {
+    p.sent = null;
+    return;
   }
+  const sent = force ? null : p.sent;
+  const view = room.game ? room.game.view(p.id) : null;
+  if (!view) {
+    if (!sent || sent.seq !== null) io.to(p.socketId).emit('game:view', null);
+    p.sent = { seq: null, parts: null, channels: sent?.channels };
+  } else {
+    const parts = {};
+    for (const [k, v] of Object.entries(view)) if (v !== undefined) parts[k] = JSON.stringify(v);
+    if (!sent || sent.seq !== room.gameSeq) {
+      io.to(p.socketId).emit('game:view', { ...view, gameId: room.gameId });
+    } else {
+      const set = {};
+      const del = [];
+      for (const k of Object.keys(parts)) if (parts[k] !== sent.parts[k]) set[k] = view[k];
+      for (const k of Object.keys(sent.parts)) if (!(k in parts)) del.push(k);
+      if (del.length || Object.keys(set).length) io.to(p.socketId).emit('game:patch', del.length ? { set, del } : { set });
+    }
+    p.sent = { seq: room.gameSeq, parts, channels: sent?.channels };
+  }
+  const channels = JSON.stringify(room.game?.chatChannels?.(p.id) || DEFAULT_CHANNELS);
+  if (channels !== sent?.channels) io.to(p.socketId).emit('chat:channels', JSON.parse(channels));
+  p.sent.channels = channels;
+}
+
+function sendGameViews(room) {
+  room.viewsQueued = false;
+  for (const p of room.players.values()) sendViewTo(room, p);
+}
+
+// ctx.update() は同じ処理の中で何度呼ばれても1回の送信にまとめる
+function queueViews(room) {
+  if (room.viewsQueued) return;
+  room.viewsQueued = true;
+  setImmediate(() => {
+    if (room.viewsQueued && rooms.get(room.code) === room) sendGameViews(room);
+  });
+}
+// 送信待ちの状態があれば先に送る(イベントや応答より状態が後に届かないように)
+function flushViews(room) {
+  if (room.viewsQueued) sendGameViews(room);
+}
+
+// 通信の往復時間(サーバーが測ったもの)。早押しの補正に使う
+function rttOf(room, playerId) {
+  const sid = room.players.get(playerId)?.socketId;
+  const list = sid ? io.sockets.sockets.get(sid)?.rtts : null;
+  if (!list?.length) return 100;
+  const sorted = [...list].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
 }
 
 function ensureHost(room) {
@@ -170,8 +223,8 @@ function removePlayer(room, playerId, announce = true) {
 }
 
 function makeGameContext(room) {
-  return {
-    update: () => sendGameViews(room),
+  const ctx = {
+    update: () => queueViews(room),
     system: (text) => system(room, text),
     post: (msg, readers = null) => {
       if (rooms.get(room.code) === room) pushChat(room, msg, readers);
@@ -179,13 +232,18 @@ function makeGameContext(room) {
     // ゲーム画面への個別イベント(アニメーションやログなど、状態とは別に届けたいもの)
     emitTo: (playerId, type, data) => {
       const sid = room.players.get(playerId)?.socketId;
-      if (sid) io.to(sid).emit('game:event', { gameId: room.gameId, type, data });
+      if (!sid) return;
+      flushViews(room);
+      io.to(sid).emit('game:event', { gameId: room.gameId, type, data });
     },
+    // その人との通信の往復時間(ミリ秒、直近の中央値)
+    rtt: (playerId) => rttOf(room, playerId),
     say: (playerId, name, text) => {
       if (rooms.get(room.code) === room) pushChat(room, { type: 'user', playerId, name, text, cpu: true });
     },
     nameOf: (id) => room.players.get(id)?.name ?? '(退室済み)',
     isConnected: (id) => !!room.players.get(id)?.connected,
+    hostId: () => room.hostId,
     finish: () => {
       room.game?.dispose?.();
       room.game = null;
@@ -194,6 +252,7 @@ function makeGameContext(room) {
       sendGameViews(room);
     },
   };
+  return ctx;
 }
 
 // ---------- ソケット ----------
@@ -251,7 +310,9 @@ function joinRoom(socket, room, name, clientId, ack) {
   room.emptySince = null;
 
   ack({ ok: true, code: room.code, playerId: id });
+  socket.emit('room:catalog', PUBLIC_CATALOG);
   socket.emit('chat:history', visibleChat(room, id));
+  p.sent = null; // 入り直した人には全部を送り直す
   room.game?.onConnectionChange?.();
   sendRoomState(room);
   sendGameViews(room);
@@ -259,6 +320,28 @@ function joinRoom(socket, room, name, clientId, ack) {
 }
 
 io.on('connection', (socket) => {
+  // 時計合わせ:画面がサーバーの時刻を聞く(早押しやタイマーの表示に使う)
+  socket.on('time:sync', (_d, ack) => {
+    if (typeof ack === 'function') ack(Date.now());
+  });
+  // 往復時間の計測:サーバーから送って返事が来るまでの時間を測る(画面の自己申告には頼らない)
+  socket.rtts = [];
+  const measure = () => {
+    const t = Date.now();
+    socket.timeout(5000).emit('time:ping', (err) => {
+      if (err) return;
+      socket.rtts.push(Date.now() - t);
+      if (socket.rtts.length > 7) socket.rtts.shift();
+    });
+  };
+  measure();
+  const quick = [setTimeout(measure, 1000), setTimeout(measure, 2500)];
+  const pinger = setInterval(measure, 10000);
+  socket.on('disconnect', () => {
+    clearInterval(pinger);
+    quick.forEach(clearTimeout);
+  });
+
   const safe = (fn) => (...args) => {
     const ack = typeof args[args.length - 1] === 'function' ? args.pop() : () => {};
     try {
@@ -300,6 +383,7 @@ io.on('connection', (socket) => {
       lastChat = now;
       pushChat(room, { type: 'user', playerId: player.id, name: player.name, text: t });
       room.game?.onPublicChat?.(player.id, t);
+      flushViews(room);
       return ack({ ok: true });
     }
     // ゲームが用意したチーム用チャンネル
@@ -345,6 +429,7 @@ io.on('connection', (socket) => {
     if (total < min) return ack({ ok: false, error: `このゲームは${min}人から遊べます(CPUを含む)` });
     if (total > g.maxPlayers) return ack({ ok: false, error: `このゲームは${g.maxPlayers}人までです(CPUを含む)` });
     room.gameId = g.id;
+    room.gameSeq++;
     system(room, `「${g.name}」を始めます`);
     room.game = g.create(makeGameContext(room), room.settings, members);
     sendRoomState(room);
@@ -363,6 +448,7 @@ io.on('connection', (socket) => {
     const { room, player } = current(socket);
     if (!room?.game || !player) return ack({ ok: false });
     room.game.action(player.id, String(type), payload ?? {}, { isHost: room.hostId === player.id });
+    flushViews(room);
     ack({ ok: true });
   }));
 
@@ -371,6 +457,7 @@ io.on('connection', (socket) => {
     if (!room || !player || player.socketId !== socket.id) return;
     player.connected = false;
     player.socketId = null;
+    player.sent = null;
     player.leftAt = Date.now();
     sendRoomState(room);
 

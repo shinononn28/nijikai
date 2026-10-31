@@ -15,6 +15,8 @@ const oekaki = require('./oekaki');
 const dengon = require('./dengon');
 const tasuketsu = require('./tasuketsu');
 const slider = require('./slider');
+const hayaoshi = require('./hayaoshi');
+const hansha = require('./hansha');
 
 const catalog = [
   kaburi,
@@ -23,6 +25,8 @@ const catalog = [
   dengon,
   tasuketsu,
   slider,
+  hayaoshi,
+  hansha,
   moon,
   kaito,
   nimaijita,

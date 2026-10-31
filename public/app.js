@@ -36,7 +36,9 @@
     room: null,
     view: null,
     chat: [],
-    timeOffset: 0,
+    timeOffset: 0, // サーバーの時計 − この端末の時計
+    rtt: null, // 時計合わせで測った往復時間
+    catalog: [],
     tab: 'game',
     unread: 0,
     notice: '',
@@ -54,6 +56,41 @@
   const isHost = () => state.room?.hostId === clientId;
   const send = (event, data = {}) =>
     new Promise((resolve) => socket.emit(event, data, (res) => resolve(res || { ok: false })));
+
+  // ---------- 時計合わせ ----------
+  // サーバーに時刻を聞き、往復時間が一番短かった回の値を信じる(NTP と同じ考え方)。
+  // タイマー表示と早押しの判定に使う。
+  const syncSamples = [];
+  function syncOnce() {
+    return new Promise((resolve) => {
+      if (!socket.connected) return resolve();
+      const t0 = performance.now();
+      const wall0 = Date.now();
+      let done = false;
+      const timer = setTimeout(() => { done = true; resolve(); }, 3000);
+      socket.emit('time:sync', {}, (serverNow) => {
+        if (done) return;
+        clearTimeout(timer);
+        const rtt = performance.now() - t0;
+        if (typeof serverNow === 'number') {
+          syncSamples.push({ rtt, offset: serverNow - (wall0 + rtt / 2) });
+          if (syncSamples.length > 10) syncSamples.shift();
+          const best = syncSamples.reduce((a, b) => (b.rtt < a.rtt ? b : a));
+          state.timeOffset = best.offset;
+          state.rtt = [...syncSamples].sort((a, b) => a.rtt - b.rtt)[Math.floor(syncSamples.length / 2)].rtt;
+        }
+        resolve();
+      });
+    });
+  }
+  async function syncBurst() {
+    for (let i = 0; i < 5; i++) {
+      await syncOnce();
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+  setInterval(syncOnce, 15000);
+  const serverNow = () => Date.now() + state.timeOffset;
 
   // ---------- 時間表示 ----------
   const remaining = (endsAt) => Math.max(0, endsAt - (Date.now() + state.timeOffset));
@@ -423,7 +460,7 @@
   }
   function loadGameClient(id) {
     if (!loading[id]) {
-      const files = state.room?.catalog.find((g) => g.id === id)?.client || [`${id}.js`];
+      const files = state.catalog.find((g) => g.id === id)?.client || [`${id}.js`];
       const ver = state.room?.build || Date.now();
       loading[id] = (async () => {
         try {
@@ -444,6 +481,8 @@
 
   const gameApi = {
     send: (type, payload) => send('game:action', { type, payload }),
+    now: serverNow, // サーバーの時計での現在時刻(早押しの判定はこの時計で行う)
+    rtt: () => state.rtt,
     say: (text) => send('chat:send', { text, channel: 'all' }), // ゲーム画面から全体チャットに書き込む(お絵描きの回答など)
     myId: me,
     isHost,
@@ -542,6 +581,7 @@
 
   // ---------- ソケットイベント ----------
   socket.on('connect', () => {
+    syncBurst();
     // 再接続時は同じ部屋に入り直す
     if (state.code) send('room:join', { code: state.code, name: store.get('nijikai.name'), clientId }).then((res) => {
       if (!res.ok) {
@@ -553,8 +593,18 @@
     });
   });
 
+  socket.on('room:catalog', (list) => {
+    state.catalog = Array.isArray(list) ? list : [];
+    if (state.room) state.room.catalog = state.catalog;
+  });
+
+  socket.on('time:ping', (ack) => {
+    if (typeof ack === 'function') ack();
+  });
+
   socket.on('room:state', (r) => {
     const wasPlaying = state.room?.playing;
+    r.catalog = state.catalog;
     state.room = r;
     if (state.screen !== 'room') return;
     renderTopbar();
@@ -564,7 +614,15 @@
 
   socket.on('game:view', (v) => {
     state.view = v;
-    if (v) state.timeOffset = v.serverNow - Date.now();
+    if (state.screen === 'room') renderMain();
+  });
+
+  // 前回からの差分(変わった項目だけ)
+  socket.on('game:patch', ({ set, del } = {}) => {
+    if (!state.view) return;
+    const v = { ...state.view, ...(set || {}) };
+    for (const k of del || []) delete v[k];
+    state.view = v;
     if (state.screen === 'room') renderMain();
   });
 
