@@ -6,36 +6,30 @@ const moon = require('./moon');
 const kaito = require('./kaito');
 const nimaijita = require('./nimaijita');
 const gaikou = require('./gaikou');
-const meikyu = require('./meikyu');
 const kijun = require('./kijun');
 const trick = require('./trick');
-const jinushi = require('./jinushi');
 const course = require('./course');
 const oekaki = require('./oekaki');
 const dengon = require('./dengon');
 const tasuketsu = require('./tasuketsu');
 const slider = require('./slider');
-const hayaoshi = require('./hayaoshi');
-const hansha = require('./hansha');
 const nazuke = require('./nazuke');
+const shibari = require('./shibari');
 
 const catalog = [
   kaburi,
   kijun,
   oekaki,
   dengon,
+  shibari,
   tasuketsu,
   slider,
-  hayaoshi,
-  hansha,
   nazuke,
   moon,
   kaito,
   nimaijita,
   gaikou,
-  meikyu,
   trick,
-  jinushi,
   course,
 ];
 

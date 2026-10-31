@@ -1,6 +1,6 @@
 // 名付けカード
 // 順番に山札から1枚ずつ場に出す。初めて出た絵なら、出した人が名前をつける。
-// 前に出た絵なら、全員がその名前をボタンで答える(押した時刻が一番早い人の答えを判定)。
+// 前に出た絵なら早押し。回答権ボタンを一番早く押した人が名前を書いて答える(設定で名前のボタンから選ぶ方式も)。
 // 正解した人は場のカードをすべてもらい、その枚数が得点になる。山札がなくなったら終わり。
 //
 // - 絵柄と山札づくりは public/games/cards.js(合計枚数は人数で変わり、ロビーで変更可。各絵柄は2枚〜でランダム)
@@ -15,9 +15,9 @@ const NAME_MS = 45000; // 名前をつける時間
 const FLIP_MS = 20000; // めくらないときは自動でめくる
 const AWAY_FLIP_MS = 2500; // 手番の人がいないときは早めにめくる
 const JUDGE_MS = 15000;
+const TYPE_MS = 20000; // 回答権を取ってから書く時間
 const RESULT_MS = 3500;
 const MISS_MS = 2500;
-const NAMED_MS = 2200;
 const MIN_RESUME_MS = 5000; // 誤答のあと、残り時間がこれより短ければここまで延ばす
 const MAX_NAME = 16;
 
@@ -54,6 +54,7 @@ class NazukeGame {
     this.kinds = deck.kinds;
     this.names = new Map(); // cardId → { name, by, at }
     this.field = [];
+    this.fieldPts = []; // 場の各カードの点数(後半ほど高い)
     this.turn = -1;
     this.seq = 0;
     this.card = null; // { id, showAt, by }
@@ -100,6 +101,20 @@ class NazukeGame {
   turnId() {
     return this.players[this.turn]?.id ?? null;
   }
+  // 山札の残りで倍率が上がる:半分を切ったら2倍、残り1/4を切ったら4倍(no 枚目をめくった直後の残りで決める)
+  stage(no) {
+    const left = this.deckTotal - no;
+    if (left < this.deckTotal / 4) return 4;
+    if (left < this.deckTotal / 2) return 2;
+    return 1;
+  }
+  // 正解したときの倍率(scaling: 'mult' のとき)
+  mult() {
+    return this.s.scaling === 'mult' && this.card ? this.stage(this.card.no) : 1;
+  }
+  fieldValue() {
+    return this.fieldPts.reduce((a, b) => a + b, 0) * this.mult();
+  }
   answerMs() {
     return (Number(this.s.answerSec) || 15) * 1000;
   }
@@ -138,6 +153,7 @@ class NazukeGame {
     const showAt = Date.now() + lead;
     this.card = { id, showAt, by: this.turnId(), no: this.deckTotal - this.deck.length };
     this.field.push(id);
+    this.fieldPts.push(this.s.scaling === 'card' ? this.stage(this.card.no) : 1);
     this.locked = new Set();
     this.passed = new Set();
     this.answers = new Map();
@@ -171,8 +187,10 @@ class NazukeGame {
     this.ctx.system(auto ? `時間切れのため、自動で「${name}」と名付けました` : `${this.name(by)}さんが「${name}」と名付けました`);
     this.clearTimers();
     this.result = { kind: 'named', name, by, cardId: this.card.id };
-    this.setPhase('named', NAMED_MS);
-    this.later(NAMED_MS, () => this.nextTurn());
+    // 名前と絵を覚える時間(設定で変えられる)
+    const memo = (Number(this.s.memorySec) || 3) * 1000;
+    this.setPhase('named', memo);
+    this.later(memo, () => this.nextTurn());
     this.ctx.update();
     return { ok: true };
   }
@@ -186,7 +204,7 @@ class NazukeGame {
 
   // ---------- 回答 ----------
   answer(pid, payload) {
-    if (this.phase !== 'answer' || this.first.has(pid)) return;
+    if (this.s.answerMode === 'buzz' || this.phase !== 'answer' || this.first.has(pid)) return;
     if (!this.eligible().includes(pid)) return;
     if (Date.now() < this.card.showAt - 50) return; // まだ表示されていない
     const text = String(payload?.text ?? '').trim().slice(0, 40);
@@ -196,19 +214,55 @@ class NazukeGame {
     this.ctx.update();
   }
 
+  // 回答権ボタン(選択肢なしで書いて答えるモード)
+  buzz(pid, payload) {
+    if (this.s.answerMode !== 'buzz' || this.phase !== 'answer' || this.first.has(pid)) return;
+    if (!this.eligible().includes(pid)) return;
+    if (Date.now() < this.card.showAt - 50) return;
+    this.first.press(pid, payload?.pressAt, { others: this.eligible(), notBefore: this.card.showAt });
+    this.ctx.update();
+  }
+
   decided({ winner }) {
     if (this.phase !== 'answer') return;
+    if (this.s.answerMode === 'buzz') return this.startTyping(winner);
     const text = this.answers.get(winner);
     this.answers = new Map();
+    this.judgeText(winner, text);
+  }
+
+  startTyping(pid) {
+    this.clearTimers();
+    this.remainMs = Math.max(MIN_RESUME_MS, (this.endsAt || Date.now()) - Date.now());
+    this.typer = pid;
+    this.setPhase('typing', TYPE_MS);
+    this.later(TYPE_MS, () => this.typeTimeUp());
+    this.ctx.update();
+  }
+  typed(pid, payload) {
+    if (this.phase !== 'typing' || pid !== this.typer) return;
+    const text = String(payload?.text ?? '').trim().slice(0, 40);
+    if (!text) return;
+    this.typer = null;
+    this.judgeText(pid, text);
+  }
+  typeTimeUp() {
+    if (this.phase !== 'typing') return;
+    const pid = this.typer;
+    this.typer = null;
+    this.wrong(pid, '(時間切れ)', this.remainMs);
+  }
+
+  judgeText(pid, text) {
     const correct = this.names.get(this.card.id).name;
-    if (normalize(text) === normalize(correct)) return this.correct(winner, text, 'auto');
-    if (this.s.judge === 'human') return this.startJudge(winner, text);
-    this.wrong(winner, text);
+    if (normalize(text) === normalize(correct)) return this.correct(pid, text, 'auto');
+    if (this.s.judge === 'human') return this.startJudge(pid, text);
+    this.wrong(pid, text, this.phase === 'answer' ? null : this.remainMs);
   }
 
   startJudge(answerer, text) {
     this.clearTimers();
-    this.remainMs = Math.max(MIN_RESUME_MS, (this.endsAt || Date.now()) - Date.now());
+    if (this.phase === 'answer') this.remainMs = Math.max(MIN_RESUME_MS, (this.endsAt || Date.now()) - Date.now());
     this.judge = { answerer, text, votes: new Map() };
     this.setPhase('judge', JUDGE_MS);
     this.later(JUDGE_MS, () => this.closeJudge(true));
@@ -249,17 +303,19 @@ class NazukeGame {
     this.clearTimers();
     this.first.reset();
     const p = this.p(pid);
-    const gain = this.field.length;
+    const gain = this.fieldValue();
+    const taken = this.field.length;
     const correctName = this.names.get(this.card.id).name;
     if (p) {
       p.score += gain;
-      p.taken += gain;
+      p.taken += taken;
       p.correct++;
     }
-    this.result = { kind: 'correct', who: pid, text, name: correctName, gain, how, cardId: this.card.id, cards: [...this.field] };
+    this.result = { kind: 'correct', who: pid, text, name: correctName, gain, taken, mult: this.mult(), how, cardId: this.card.id, cards: [...this.field] };
     this.field = [];
+    this.fieldPts = [];
     const by = how === 'host' ? '(ホスト判定)' : how === 'vote' ? '(みんなの判定)' : '';
-    this.ctx.system(`${this.name(pid)}さんが「${correctName}」で正解${by}!場の${gain}枚を獲得`);
+    this.ctx.system(`${this.name(pid)}さんが「${correctName}」で正解${by}!場の${taken}枚を獲得(+${gain}点)`);
     this.setPhase('result', RESULT_MS);
     this.later(RESULT_MS, () => this.nextTurn());
     this.ctx.update();
@@ -328,7 +384,8 @@ class NazukeGame {
       if (!res.ok) this.ctx.emitTo(pid, 'nameError', { error: res.error });
       return;
     }
-    if (type === 'answer') return this.answer(pid, payload);
+    if (type === 'buzz') return this.buzz(pid, payload);
+    if (type === 'answer') return this.phase === 'typing' ? this.typed(pid, payload) : this.answer(pid, payload);
     if (type === 'pass') return this.pass(pid);
     if (type === 'vote') return this.vote(pid, payload?.ok, isHost);
     if (type === 'finish' && this.phase === 'ended' && isHost) return this.ctx.finish();
@@ -346,6 +403,7 @@ class NazukeGame {
   onConnectionChange() {
     if (this.phase === 'answer' && !this.eligible().length && !this.first.pending.length) return this.miss();
     if (this.phase === 'judge') this.closeJudge(false);
+    if (this.phase === 'typing' && !this.on(this.typer)) return this.typeTimeUp();
     // 手番の人がいなくなったら早めに進める
     if (this.phase === 'flip' && !this.on(this.turnId())) {
       this.clearTimers();
@@ -375,6 +433,10 @@ class NazukeGame {
       deckTotal: this.deckTotal,
       kinds: this.kinds,
       field: this.field.length,
+      fieldValue: this.fieldValue(),
+      scaling: this.s.scaling,
+      stage: this.card ? this.stage(this.card.no) : this.stage(this.deckTotal - this.deck.length + 1),
+      cardValue: this.fieldPts.length ? this.fieldPts[this.fieldPts.length - 1] : null,
       card: showCard ? { id: this.card.id, showAt: this.card.showAt, by: this.card.by, no: this.card.no } : null,
       names: nameList,
       answerMode: this.s.answerMode,
@@ -384,6 +446,7 @@ class NazukeGame {
       passed: this.passed.has(pid),
       pressed: this.first.has(pid),
       pending: ph === 'answer' && this.first.pending.length > 0,
+      typer: ph === 'typing' ? this.typer : null,
       lastWrong: ph === 'answer' && this.lastWrong && this.locked.has(this.lastWrong.who) ? this.lastWrong : null,
       suggestions: ph === 'name' && pid === this.card?.by ? this.suggestions : null,
       judge: null,
@@ -392,10 +455,12 @@ class NazukeGame {
         id: p.id,
         name: this.name(p.id),
         score: p.score,
+        taken: p.taken,
         correct: p.correct,
         named: p.named,
         connected: this.on(p.id),
-        state: ph === 'answer' || ph === 'judge'
+        state: ph === 'typing' && p.id === this.typer ? 'typing'
+          : ph === 'answer' || ph === 'judge' || ph === 'typing'
           ? this.locked.has(p.id) ? 'wrong' : this.passed.has(p.id) ? 'pass' : this.first.has(p.id) ? 'pressed' : null
           : null,
       })),
@@ -428,19 +493,21 @@ module.exports = {
   name: '名付けカード',
   tagline: '初めて出た絵には名前をつけ、また出たらその名前を早押しで答える。',
   description:
-    '順番に山札から1枚ずつ場に出します。初めて出た絵なら、出した人がその場で名前をつけます。前に出た絵なら、全員がこれまでについた名前のボタンから答えを選び、一番早く押した人の答えを判定。' +
-    '正解した人は場のカードをすべてもらい、その枚数が得点になります(外したらそのカードでは答えられない)。山札がなくなったら終わり。' +
+    '順番に山札から1枚ずつ場に出します。初めて出た絵なら、出した人がその場で名前をつけます。前に出た絵なら早押し。回答権ボタンを一番早く押した人が名前を書いて答えます(設定で、これまでの名前のボタンから選ぶ方式にもできる)。' +
+    '正解した人は場のカードをすべてもらい得点に。序盤に積もった山だけで決まらないよう、既定では山札が半分を切ってから出たカードは2点、残り1/4を切ってからは4点。外したらそのカードでは答えられません。山札がなくなったら終わり。' +
     '絵は「りんご」「ねこ」のようなふつうの絵と、なんだかわからない生き物(そっくりさんあり)。山札の枚数は人数で変わり、各絵柄は2枚以上でランダムに入ります。',
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
     ...Cards.SETTINGS,
+    { key: 'memorySec', label: '名付けのあと覚える時間', default: 3, options: [2, 3, 5, 8, 12].map((n) => ({ value: n, label: `${n}秒` })) },
     { key: 'answerSec', label: '答える時間', default: 15, options: [10, 15, 20, 30].map((n) => ({ value: n, label: `${n}秒` })) },
     {
       key: 'answerMode',
       label: '答え方',
-      default: 'buttons',
+      default: 'buzz',
       options: [
+        { value: 'buzz', label: '回答権ボタン→書いて答える(選択肢なし)' },
         { value: 'buttons', label: '名前のボタンから選ぶ' },
         { value: 'both', label: 'ボタン+書いて答える' },
       ],
@@ -461,6 +528,16 @@ module.exports = {
       options: [
         { value: 'vote', label: '回答者以外の多数決' },
         { value: 'host', label: 'ホストが決める(多数決も可)' },
+      ],
+    },
+    {
+      key: 'scaling',
+      label: '得点',
+      default: 'card',
+      options: [
+        { value: 'card', label: '後から出たカードほど高い(山札が半分を切ったら2点・残り1/4で4点)' },
+        { value: 'mult', label: '後の正解ほど倍率が高い(山札が半分を切ったら×2・残り1/4で×4)' },
+        { value: 'none', label: 'カード1枚=1点' },
       ],
     },
     {

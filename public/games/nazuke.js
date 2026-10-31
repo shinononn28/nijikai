@@ -16,7 +16,9 @@
       this.revealTimer = null;
       this.onClickBound = (e) => this.onClick(e);
       root.addEventListener('click', this.onClickBound);
-      this.unbind = NijiBuzz.bindPress(root, '#nz-flip', () => this.api.send('flip'));
+      const unFlip = NijiBuzz.bindPress(root, '#nz-flip', () => this.api.send('flip'));
+      const unBuzz = NijiBuzz.bindPress(root, '#nz-buzz:not([disabled])', (ev) => this.buzz(ev));
+      this.unbind = () => { unFlip(); unBuzz(); };
     }
 
     destroy() {
@@ -58,12 +60,13 @@
     // ---------- 組み立て(フェーズが変わったときだけ) ----------
     build(v) {
       const e = this.esc;
-      const label = { flip: 'めくる', name: '名付け', answer: '回答', judge: '判定', result: '正解!', miss: '時間切れ', named: '名付け', ended: '最終結果' }[v.phase];
+      const label = { flip: 'めくる', name: '名付け', answer: '回答', typing: '回答中', judge: '判定', result: '正解!', miss: '時間切れ', named: '名付け', ended: '最終結果' }[v.phase];
       this.root.innerHTML = `
         <div class="kb nz">
           <div class="kb-head">
             <span class="kb-round">山札 残り${v.deckLeft} / ${v.deckTotal}枚</span>
             <span class="kb-phase">${label}</span>
+            ${this.stageHtml(v)}
             ${v.endsAt ? `<span class="timer" data-ends-at="${v.endsAt}"></span>` : ''}
           </div>
           ${v.phase === 'ended' ? this.endedHtml(v) : `
@@ -81,11 +84,20 @@
       if (v.card && !this.shown()) {
         this.revealTimer = setTimeout(() => this.update(this.v), Math.max(0, v.card.showAt - this.api.now()) + 10);
       }
-      const input = this.root.querySelector('#nz-name, #nz-free');
+      const input = this.root.querySelector('#nz-name, #nz-free, #nz-type');
       if (input) {
-        this.api.onEnter(input, () => this.root.querySelector(input.id === 'nz-name' ? '#nz-name-send' : '#nz-free-send')?.click());
-        if (input.id === 'nz-name' && !matchMedia('(pointer: coarse)').matches) setTimeout(() => input.focus(), 50);
+        this.api.onEnter(input, () => this.root.querySelector(`#${input.id === 'nz-name' ? 'nz-name' : input.id === 'nz-free' ? 'nz-free' : 'nz-type'}-send`)?.click());
+        // 回答権を取った人はすぐ書けるように、スマホでも入力欄にフォーカスする
+        if (input.id === 'nz-type' || (input.id === 'nz-name' && !matchMedia('(pointer: coarse)').matches)) setTimeout(() => input.focus(), 30);
       }
+    }
+
+    // 後半ほど得点が高くなる表示
+    stageHtml(v) {
+      if (v.phase === 'ended' || v.scaling === 'none') return '';
+      const name = { 1: '前半', 2: '残り半分', 4: '残り1/4' }[v.stage] || '';
+      const what = v.scaling === 'mult' ? `正解で×${v.stage}` : `1枚${v.stage}点`;
+      return `<span class="nz-stage-tag nz-stage-${v.stage}">${name}・${what}</span>`;
     }
 
     actHtml(v) {
@@ -111,6 +123,25 @@
         }
         return `<p class="nz-wait">初めて出た絵!${e(this.nameOf(v.card?.by))}さんが名前を考えています</p>
                 <p class="kt-note">この絵をよく覚えておきましょう。</p>`;
+      }
+      if (v.phase === 'answer' && v.answerMode === 'buzz') {
+        return `<h3 class="kb-sub">前に出た絵です。名前がわかったら回答権を取ろう</h3>
+                <button class="btn btn-primary btn-block nz-buzz" id="nz-buzz" type="button">回答する!</button>
+                <div class="nz-act-foot">
+                  <p class="nz-status" id="nz-status"></p>
+                  <button class="btn btn-quiet btn-small" id="nz-pass" type="button">わからない</button>
+                </div>
+                <p class="kt-note">タップ(PCはスペースキー)で回答権。一番早く押した人が名前を書いて答えます。</p>`;
+      }
+      if (v.phase === 'typing') {
+        if (v.typer === me) {
+          return `<h3 class="kb-sub">回答権を取りました!名前を書いてください</h3>
+                  <div class="kt-tip-row">
+                    <input id="nz-type" maxlength="40" placeholder="この絵の名前" autocomplete="off">
+                    <button class="btn btn-primary" id="nz-type-send" type="button">答える</button>
+                  </div>`;
+        }
+        return `<p class="nz-wait">${e(this.nameOf(v.typer))}さんが回答中…</p>`;
       }
       if (v.phase === 'answer') {
         const free = v.answerMode === 'both'
@@ -146,7 +177,7 @@
       if (v.phase === 'result' && v.result) {
         const r = v.result;
         return `<p class="nz-big"><b>${e(this.nameOf(r.who))}</b>さん正解!「${e(r.name)}」</p>
-                <p class="nz-gain">場の${r.gain}枚を獲得 <b>+${r.gain}点</b></p>
+                <p class="nz-gain">場の${r.taken}枚を獲得${r.mult > 1 ? `(×${r.mult})` : ''} <b>+${r.gain}点</b></p>
                 ${r.text !== r.name ? `<p class="kt-note">答え:「${e(r.text)}」${r.how === 'host' ? '(ホスト判定)' : r.how === 'vote' ? '(みんなの判定)' : ''}</p>` : ''}`;
       }
       if (v.phase === 'miss' && v.result) {
@@ -196,8 +227,9 @@
       }
       const field = this.root.querySelector('#nz-field');
       if (field) {
-        const n = v.phase === 'result' ? v.result?.gain ?? 0 : v.field;
-        field.textContent = n ? `場に${n}枚` : '場は空';
+        const n = v.phase === 'result' ? v.result?.taken ?? 0 : v.field;
+        const pts = v.phase === 'result' ? v.result?.gain ?? 0 : v.fieldValue;
+        field.textContent = !n ? '場は空' : v.scaling === 'none' ? `場に${n}枚` : `場に${n}枚・${pts}点`;
       }
       const cap = this.root.querySelector('#nz-caption');
       if (cap) {
@@ -218,14 +250,14 @@
     refreshAnswer(v) {
       const shown = this.shown();
       const blocked = v.locked || v.passed || v.pressed || !shown;
-      this.root.querySelectorAll('[data-answer], #nz-free-send, #nz-pass, #nz-free').forEach((b) => { b.disabled = blocked; });
+      this.root.querySelectorAll('[data-answer], #nz-free-send, #nz-pass, #nz-free, #nz-buzz').forEach((b) => { b.disabled = blocked; });
       const st = this.root.querySelector('#nz-status');
       if (st) {
         const e = this.esc;
         const wrong = v.lastWrong ? `${e(this.nameOf(v.lastWrong.who))}さんの「${e(v.lastWrong.text)}」は✕。` : '';
         st.innerHTML = v.locked ? `${wrong}このカードではもう答えられません`
           : v.passed ? 'パスしました'
-          : v.pressed ? '答えを送りました…'
+          : v.pressed ? (v.answerMode === 'buzz' ? '押しました!' : '答えを送りました…')
           : v.pending ? `${wrong}誰かが答えています…`
           : !shown ? 'めくっています…'
           : wrong || '一番早く押した人の答えで判定します';
@@ -237,19 +269,20 @@
       const tag = (p) => {
         if (p.state === 'wrong') return '<span class="tag">✕</span>';
         if (p.state === 'pass') return '<span class="tag">パス</span>';
-        if (p.state === 'pressed') return '<span class="tag tag-done">回答中</span>';
+        if (p.state === 'pressed') return '<span class="tag tag-done">押した</span>';
+        if (p.state === 'typing') return '<span class="tag tag-done">回答中</span>';
         return '';
       };
       const list = v.phase === 'ended' ? [...v.players].sort((a, b) => b.score - a.score) : v.players;
       this.root.querySelector('#nz-players').innerHTML = `
-        <h3 class="kb-sub">得点(とったカードの枚数)</h3>
+        <h3 class="kb-sub">得点</h3>
         <ul class="kt-team">${list.map((p) => `
           <li class="${p.connected ? '' : 'is-away'}${p.id === v.turnId && v.phase !== 'ended' ? ' nz-turn' : ''}">
             <span class="player-name">${e(p.name)}</span>
             ${p.id === this.me() ? '<span class="tag">あなた</span>' : ''}
             ${p.id === v.turnId && v.phase !== 'ended' ? '<span class="tag tag-host">手番</span>' : ''}
             ${tag(p)}
-            <span class="kt-tickets"><b class="nz-score">${p.score}</b>点 <small>(正解${p.correct}・名付け${p.named})</small></span>
+            <span class="kt-tickets"><b class="nz-score">${p.score}</b>点 <small>(${p.taken}枚・正解${p.correct}・名付け${p.named})</small></span>
           </li>`).join('')}</ul>`;
     }
 
@@ -286,8 +319,27 @@
         if (!text) return input?.focus();
         return this.sendAnswer(text, ev, t);
       }
+      if (t.id === 'nz-buzz') {
+        if (ev.detail === 0) this.buzz(ev); // Enter キー。タップとスペースは bindPress が受ける
+        return;
+      }
+      if (t.id === 'nz-type-send') {
+        const input = this.root.querySelector('#nz-type');
+        const text = input?.value.trim();
+        if (!text) return input?.focus();
+        t.disabled = true;
+        return this.api.send('answer', { text });
+      }
       if (t.id === 'nz-pass') return this.api.send('pass');
       if (t.dataset.vote != null) return this.api.send('vote', { ok: t.dataset.vote === '1' });
+    }
+
+    buzz(ev) {
+      const v = this.v;
+      if (!v || v.phase !== 'answer' || v.answerMode !== 'buzz' || v.locked || v.passed || v.pressed || !this.shown()) return;
+      const pressAt = NijiBuzz.pressAt(this.api, ev);
+      this.root.querySelectorAll('#nz-buzz, #nz-pass').forEach((b) => { b.disabled = true; });
+      this.api.send('buzz', { pressAt });
     }
 
     sendAnswer(text, ev, btn) {
