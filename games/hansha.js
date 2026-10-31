@@ -7,7 +7,7 @@
 // - 画面は、実際に表示した瞬間から押した瞬間までを測って送る。届くのが遅れた人も自分の画面基準で測るので不利にならない。
 // - 自己申告なので、サーバーが測った往復時間から「ありえる範囲」に丸め、100ms 未満はフライング扱いにする。
 
-const { clampPressAt, displayLead } = require('./buzz');
+const { judgeReaction, displayLead } = require('./buzz');
 
 const RULE_MS = 3500;
 const FIRST_CARD_MS = 1600;
@@ -219,18 +219,14 @@ class HanshaGame {
     const i = Number(payload.i);
     const card = this.cards[i];
     if (!card || !card.showAt || !this.card || i > this.card.i) return;
-    const now = Date.now();
-    const rtt = this.ctx.rtt(p.id);
-    const pressAt = clampPressAt(payload.pressAt, now, rtt);
     if (i !== this.targetIdx) {
       this.foul(p, 'foul');
     } else {
-      // 画面の申告した反応時間を、サーバーから見てありえる範囲に丸める
-      const serverRt = pressAt - card.showAt;
-      let rt = Number(payload.rt);
-      if (!Number.isFinite(rt)) rt = serverRt;
-      rt = Math.round(Math.max(serverRt - rtt - 150, Math.min(serverRt + 150, rt)));
-      if (rt < MIN_HUMAN_MS) this.foul(p, 'flying', rt);
+      // 画面の申告した反応時間を、サーバーから見てありえる範囲に丸める(games/buzz.js)
+      const { rt, flying } = judgeReaction({
+        claimedRt: payload.rt, claimedPressAt: payload.pressAt, showAt: card.showAt, rtt: this.ctx.rtt(p.id), minHuman: MIN_HUMAN_MS,
+      });
+      if (flying) this.foul(p, 'flying', rt);
       else {
         this.presses.set(p.id, { kind: 'hit', rt });
         if (p.best === null || rt < p.best) p.best = rt;
@@ -351,6 +347,7 @@ module.exports = {
       ],
     },
   ],
+  client: ['buzz-client.js', 'hansha.js'],
   create: (ctx, settings, playerIds) => new HanshaGame(ctx, settings, playerIds),
   _internal: { RULES },
 };

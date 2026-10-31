@@ -13,27 +13,21 @@
       this.api = api;
       this.esc = api.esc;
       this.key = null;
-      this.shownCard = null; // いま画面に出ているカード { i, perf }
-      this.pending = null; // 表示待ちのカード
       this.sent = false;
-      this.onPointerBound = (e) => this.onPointer(e);
-      this.onKeyBound = (e) => this.onKey(e);
+      // カードは予約時刻ちょうどに出し、出た瞬間を覚えておく(public/games/buzz-client.js)
+      this.shower = new NijiBuzz.Shower(api, (card) => {
+        this.setCard(this.face(card));
+        this.renderStatus(this.v);
+      });
+      this.unbind = NijiBuzz.bindPress(root, '#hs-pad', (ev) => this.press(ev));
       this.onClickBound = (e) => this.onClick(e);
-      root.addEventListener('pointerdown', this.onPointerBound);
       root.addEventListener('click', this.onClickBound);
-      window.addEventListener('keydown', this.onKeyBound);
-      this.loop = () => {
-        this.raf = requestAnimationFrame(this.loop);
-        this.tick();
-      };
-      this.raf = requestAnimationFrame(this.loop);
     }
 
     destroy() {
-      cancelAnimationFrame(this.raf);
-      this.root.removeEventListener('pointerdown', this.onPointerBound);
+      this.shower.destroy();
+      this.unbind();
       this.root.removeEventListener('click', this.onClickBound);
-      window.removeEventListener('keydown', this.onKeyBound);
     }
 
     face(f, cls = '') {
@@ -42,19 +36,15 @@
     }
 
     update(v) {
-      const prev = this.v;
       this.v = v;
       const key = `${v.phase}:${v.seq}`;
       if (key !== this.key) {
         this.key = key;
-        if (v.phase !== 'run' && v.phase !== 'result') {
-          this.shownCard = null;
-          this.pending = null;
-        }
+        if (v.phase !== 'run' && v.phase !== 'result') this.shower.clear();
         if (v.phase === 'rule') this.sent = false;
         this.build(v);
       }
-      if (v.phase === 'run' && v.card && v.card.i !== (prev?.card?.i ?? -1) && v.card.i !== this.shownCard?.i) this.pending = v.card;
+      if (v.phase === 'run' && v.card) this.shower.set(v.card, v.card.i);
       this.refresh(v);
     }
 
@@ -96,7 +86,7 @@
       this.renderStatus(v);
       if (v.phase === 'rule') this.setCard('<span class="hs-ready">準備…</span>');
       if (v.phase === 'result' && v.card) this.setCard(this.face(v.card), true);
-      if (v.phase === 'run' && !this.shownCard && !this.pending) this.setCard('<span class="hs-ready">集中!</span>');
+      if (v.phase === 'run' && !this.shower.current && !this.shower.pending) this.setCard('<span class="hs-ready">集中!</span>');
     }
 
     setCard(html, hit = false) {
@@ -104,19 +94,6 @@
       if (!el) return;
       el.innerHTML = html;
       el.classList.toggle('is-hit', hit);
-    }
-
-    tick() {
-      const c = this.pending;
-      if (!c || this.v?.phase !== 'run') return;
-      if (this.api.now() < c.showAt) return;
-      this.pending = null;
-      this.setCard(this.face(c));
-      const card = { i: c.i, perf: performance.now() };
-      this.shownCard = card;
-      // 次のフレームの時刻 ≒ 実際に画面に出た瞬間
-      requestAnimationFrame((t) => { card.perf = t; });
-      this.renderStatus(this.v);
     }
 
     renderStatus(v) {
@@ -150,33 +127,14 @@
 
     press(ev) {
       const v = this.v;
-      if (!v || v.phase !== 'run' || this.sent || !this.shownCard) return;
+      if (!v || v.phase !== 'run' || this.sent) return;
       const me = v.players.find((p) => p.id === this.api.myId());
       if (!me || me.state) return;
-      const t = typeof ev?.timeStamp === 'number' && ev.timeStamp > 0 ? ev.timeStamp : performance.now();
-      const lag = Math.max(0, Math.min(500, performance.now() - t));
+      const r = this.shower.reaction(ev);
+      if (!r) return; // まだ1枚も出ていない
       this.sent = true;
       this.renderStatus(v);
-      this.api.send('press', {
-        i: this.shownCard.i,
-        rt: Math.round(t - this.shownCard.perf),
-        pressAt: this.api.now() - lag,
-      });
-    }
-
-    onPointer(ev) {
-      if (ev.target.closest('#hs-pad')) {
-        ev.preventDefault();
-        this.press(ev);
-      }
-    }
-
-    onKey(ev) {
-      if (ev.code !== 'Space' && ev.key !== ' ') return;
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) || ev.repeat) return;
-      if (this.v?.phase !== 'run') return;
-      ev.preventDefault();
-      this.press(ev);
+      this.api.send('press', { i: r.item.i, rt: r.rt, pressAt: r.pressAt });
     }
 
     onClick(ev) {

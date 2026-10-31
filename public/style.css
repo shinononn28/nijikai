@@ -1239,3 +1239,75 @@ th:not(:first-child) { text-align: right; }
 .hs-ready { font-size: 1.4rem; color: var(--muted); }
 .hs-status { min-height: 1.6em; font-weight: 700; color: var(--brass); }
 .hs-help { text-align: center; color: var(--felt-muted); }
+
+/* ---------- カードの絵柄(public/games/cards.js) ---------- */
+.nc-art { display: inline-grid; justify-items: center; align-content: center; gap: 0.2em; width: 1em; line-height: 1; }
+.nc-art .nc-emoji { font-size: 0.8em; line-height: 1; }
+.nc-art .nc-svg { width: 1em; height: 1em; display: block; }
+.nc-label { font-size: 0.16em; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.nc-unknown { color: var(--muted); }
+
+/* 見本ページ(/cards.html) */
+.ncp { max-width: 980px; margin: 0 auto; padding: 1.2rem 16px 3rem; display: grid; gap: 1.2rem; }
+.ncp h1 { font-family: var(--font-display); font-size: 1.6rem; }
+.ncp h2 { font-size: 1.05rem; }
+.ncp .kt-panel p { color: var(--muted); font-size: 0.9rem; }
+.ncp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 0.6rem; }
+.ncp-cell { background: var(--paper); border-radius: 10px; padding: 0.4rem 0.2rem 0.5rem; display: grid; justify-items: center; gap: 0.15rem; font-size: 0.75rem; color: var(--muted); }
+.ncp-cell .nc-art { font-size: 64px; }
+.ncp-cell.is-pair-start { box-shadow: inset 3px 0 0 var(--brass); }
+.ncp-controls { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
+.ncp-controls label { display: grid; gap: 0.2rem; font-size: 0.85rem; font-weight: 700; }
+.ncp-summary { font-weight: 700; color: var(--ink) !important; }
+.ncp-deck { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 0.5rem; }
+.ncp-deck .ncp-cell .nc-art { font-size: 48px; }
+.ncp-deck b { color: var(--ink); font-size: 0.9rem; }
+
+/* ---------- 名付けカード ---------- */
+.nz-stage { display: grid; justify-items: center; gap: 0.5rem; }
+.nz-pile { position: relative; display: grid; justify-items: center; }
+.nz-card {
+  position: relative; width: min(13rem, 58vw); aspect-ratio: 3 / 4; display: grid; place-items: center;
+  background: var(--card); color: var(--ink); border-radius: 18px; border: 4px solid transparent;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.25); font-size: min(9rem, 40vw); line-height: 1;
+}
+.nz-card.is-stacked { box-shadow: 6px 6px 0 -1px var(--paper), 6px 6px 0 2px rgba(0, 0, 0, 0.2), 0 8px 0 rgba(0, 0, 0, 0.25); }
+.nz-card.is-tall { box-shadow: 6px 6px 0 -1px var(--paper), 12px 12px 0 -2px #ece8de, 12px 12px 0 1px rgba(0, 0, 0, 0.2), 0 8px 0 rgba(0, 0, 0, 0.25); }
+.nz-card.is-win { border-color: var(--brass); }
+.nz-card.is-flip { animation: nz-flip 0.28s ease-out; }
+@keyframes nz-flip { from { transform: rotateY(80deg) scale(0.95); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .nz-card.is-flip { animation: none; } }
+.nz-back { font-family: var(--font-display); font-size: 0.4em; color: var(--muted); }
+.nz-field {
+  position: absolute; top: -0.6rem; right: -0.8rem; background: var(--red); color: #fff; font-weight: 700; font-size: 0.85rem;
+  border-radius: 999px; padding: 0.15rem 0.65rem; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3); white-space: nowrap;
+}
+.nz-caption { color: var(--felt-muted); font-size: 0.9rem; text-align: center; }
+.nz-caption b { color: var(--felt-text); }
+.nz-act { text-align: left; }
+.nz-flip { font-size: 1.2rem; padding: 0.8em 1em; }
+.nz-wait { font-weight: 700; text-align: center; }
+.nz-suggest { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.nz-names { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: 0.5rem; }
+.nz-name-btn { padding: 0.6em 0.5em; word-break: break-all; }
+.nz-name-btn.is-picked { background: var(--brass); }
+.nz-name-btn:disabled { opacity: 0.55; cursor: default; }
+.nz-act-foot { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.nz-status { font-size: 0.88rem; font-weight: 700; color: var(--muted); flex: 1; min-width: 12rem; }
+.nz-judge { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.nz-judge > div { background: var(--paper); border-radius: 10px; padding: 0.5rem 0.7rem; display: grid; }
+.nz-judge b { font-size: 1.25rem; word-break: break-all; }
+.nz-vote { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.nz-vote .btn { flex: 1; }
+.nz-vote .btn.is-on { outline: 3px solid var(--brass); outline-offset: 2px; }
+.nz-big { font-size: 1.3rem; text-align: center; }
+.nz-big b { font-family: var(--font-display); font-weight: 400; }
+.nz-gain { text-align: center; font-weight: 700; }
+.nz-gain b { color: var(--red); font-size: 1.3rem; }
+.nz-turn .player-name { font-weight: 700; }
+.nz-score { font-size: 1.05rem; color: var(--ink); }
+.nz-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 0.6rem; }
+.nz-gcell { background: var(--paper); border-radius: 10px; padding: 0.5rem 0.3rem; display: grid; justify-items: center; gap: 0.15rem; text-align: center; }
+.nz-gcell .nc-art { font-size: 56px; }
+.nz-gcell b { font-size: 0.9rem; word-break: break-all; }
+.nz-gcell span { font-size: 0.72rem; color: var(--muted); }

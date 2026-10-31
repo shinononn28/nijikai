@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>カードの見本</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- 開発用:カードの絵柄と山札づくり(public/games/cards.js)の見本 -->
+  <main class="ncp">
+    <h1>カードの見本</h1>
+    <section class="kt-panel">
+      <h2>山札をためしに作る</h2>
+      <p>人数から合計枚数を決め(設定で変更可)、各絵柄は2枚〜上限枚数でランダム。選ばれない絵柄もあります。</p>
+      <div class="ncp-controls">
+        <label>人数 <select id="players"></select></label>
+        <label>山札の枚数 <select id="size"></select></label>
+        <label>絵柄 <select id="pool"></select></label>
+        <button class="btn btn-primary" id="build">作る</button>
+      </div>
+      <p class="ncp-summary" id="summary"></p>
+      <div class="ncp-deck" id="deck"></div>
+    </section>
+    <section class="kt-panel">
+      <h2>ふつうの絵</h2>
+      <div class="ncp-grid" id="nouns"></div>
+    </section>
+    <section class="kt-panel">
+      <h2>なぞの絵</h2>
+      <p>2体ずつ「そっくりさん」で、どこか1か所だけ違います(左の線が組の始まり)。</p>
+      <div class="ncp-grid" id="mystery"></div>
+    </section>
+  </main>
+  <script src="/games/cards.js"></script>
+  <script>
+    (() => {
+      const C = window.NijiCards;
+      const $ = (s) => document.querySelector(s);
+      const cell = (k, i) => `<div class="ncp-cell${k.type === 'mystery' && i % 2 === 0 ? ' is-pair-start' : ''}">${C.render(k.id)}<span>${k.name ?? k.code}</span></div>`;
+      $('#nouns').innerHTML = C.NOUNS.map(cell).join('');
+      $('#mystery').innerHTML = C.MYSTERY.map(cell).join('');
+      $('#players').innerHTML = Array.from({ length: 11 }, (_, i) => i + 2).map((n) => `<option value="${n}"${n === 4 ? ' selected' : ''}>${n}人</option>`).join('');
+      const [sizeField, poolField] = C.SETTINGS;
+      $('#size').innerHTML = sizeField.options.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+      $('#pool').innerHTML = poolField.options.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+      function build() {
+        const players = Number($('#players').value);
+        const d = C.deckFromSettings({ deckSize: $('#size').value, cardPool: $('#pool').value }, players);
+        const ids = Object.keys(d.counts).sort((a, b) => d.counts[b] - d.counts[a]);
+        $('#summary').textContent = `${d.cards.length}枚・${d.kinds}種類(1種類 ${d.minCopies}〜${d.maxCopies}枚)・使わなかった絵柄 ${d.unused.length}種類`;
+        $('#deck').innerHTML = ids.map((id) => { const k = C.get(id); return `<div class="ncp-cell">${C.render(id)}<b>×${d.counts[id]}</b><span>${k.name ?? k.code}</span></div>`; }).join('');
+      }
+      $('#build').onclick = build;
+      ['#players', '#size', '#pool'].forEach((s) => ($(s).onchange = build));
+      build();
+    })();
+  </script>
+</body>
+</html>

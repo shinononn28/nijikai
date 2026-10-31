@@ -14,11 +14,9 @@
       this.pressed = false;
       this.shown = -1;
       this.onClickBound = (e) => this.onClick(e);
-      this.onPointerBound = (e) => this.onPointer(e);
-      this.onKeyBound = (e) => this.onKey(e);
       root.addEventListener('click', this.onClickBound);
-      root.addEventListener('pointerdown', this.onPointerBound);
-      window.addEventListener('keydown', this.onKeyBound);
+      // ボタンのタップとスペースキー(public/games/buzz-client.js)
+      this.unbind = NijiBuzz.bindPress(root, '#hy-buzz', (ev) => this.press(ev));
       this.loop = () => {
         this.raf = requestAnimationFrame(this.loop);
         this.tick();
@@ -29,8 +27,7 @@
     destroy() {
       cancelAnimationFrame(this.raf);
       this.root.removeEventListener('click', this.onClickBound);
-      this.root.removeEventListener('pointerdown', this.onPointerBound);
-      window.removeEventListener('keydown', this.onKeyBound);
+      this.unbind();
     }
 
     me() {
@@ -263,8 +260,7 @@
       const v = this.v;
       if (!v || v.phase !== 'reading' || !v.canBuzz || this.pressed) return;
       // イベントが起きた瞬間(timeStamp)まで戻した、サーバー時計での押した時刻
-      const lag = ev && typeof ev.timeStamp === 'number' ? Math.max(0, performance.now() - ev.timeStamp) : 0;
-      const pressAt = this.api.now() - Math.min(lag, 500);
+      const pressAt = NijiBuzz.pressAt(this.api, ev);
       this.frozen = this.shownAt(v, pressAt);
       this.pressed = true;
       this.shown = -1;
@@ -280,22 +276,6 @@
           this.renderAct(this.v);
         }
       }, 3000);
-    }
-
-    onPointer(ev) {
-      if (ev.target.closest('#hy-buzz')) {
-        ev.preventDefault();
-        this.press(ev);
-      }
-    }
-
-    onKey(ev) {
-      if (ev.code !== 'Space' && ev.key !== ' ') return;
-      const tag = document.activeElement?.tagName;
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || ev.repeat) return;
-      if (this.v?.phase !== 'reading') return;
-      ev.preventDefault();
-      this.press(ev);
     }
 
     submitAnswer() {

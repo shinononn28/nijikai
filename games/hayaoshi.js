@@ -9,7 +9,7 @@
 //   届いた順ではなく押した時刻の順で決めるので、回線の遅い人が不利にならない。
 
 const { QUESTIONS } = require('./hayaoshi-questions');
-const { clampPressAt, collectWindow, displayLead } = require('./buzz');
+const { FirstPress, displayLead } = require('./buzz');
 
 const AFTER_MS = 5000; // 全文が出てから押せる時間
 const RESUME_MS = 1200; // 誤答のあと読み上げを再開するまで
@@ -48,6 +48,7 @@ class HayaoshiGame {
     this.charMs = Number(settings.speed);
     this.timers = new Set();
     this.left = new Set();
+    this.first = new FirstPress({ rtt: (id) => this.ctx.rtt(id), onDecide: (r) => this.decide(r) });
     this.players = humanIds.map((id) => ({ id, score: 0, correct: 0, wrong: 0, restNext: false, resting: false }));
     this.order = shuffle(humanIds);
     this.turn = -1;
@@ -68,7 +69,7 @@ class HayaoshiGame {
   clearTimers() {
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
-    this.collectTimer = null;
+    this.first.reset();
   }
   dispose() {
     this.clearTimers();
@@ -97,7 +98,6 @@ class HayaoshiGame {
     this.q = null;
     this.attempts = [];
     this.locked = new Set();
-    this.pending = [];
     this.answerer = null;
     this.answerText = null;
     this.reveal = { from: 0, segStart: null };
@@ -166,7 +166,7 @@ class HayaoshiGame {
     this.readEndsAt = end;
     this.later(Math.max(0, end - Date.now()), () => {
       if (this.phase !== 'reading') return;
-      if (this.pending.length) return this.decide(); // 締め切り直前の押しを先に判定
+      if (this.first.decide()) return; // 締め切り直前の押しを先に判定
       this.endQuestion(null);
     });
   }
@@ -183,29 +183,20 @@ class HayaoshiGame {
   }
 
   buzz(p, claimed) {
-    if (!this.canBuzz(p) || this.pending.some((x) => x.id === p.id)) return;
-    const now = Date.now();
-    let pressAt = clampPressAt(claimed, now, this.ctx.rtt(p.id));
-    pressAt = Math.max(pressAt, this.reveal.segStart ?? pressAt); // 読み始める前の押しは読み始めの瞬間として扱う
-    this.pending.push({ id: p.id, pressAt });
-    if (this.collectTimer) return;
-    // ほかの人の「もっと早い押し」がまだ届いていないかもしれないので、少しだけ待ってから決める
-    const others = this.eligible().filter((x) => x.id !== p.id).map((x) => this.ctx.rtt(x.id));
-    this.collectTimer = this.later(collectWindow(others), () => this.decide());
+    if (!this.canBuzz(p)) return;
+    // ほかの人の「もっと早い押し」がまだ届いていないかもしれないので、少しだけ待ってから決める(games/buzz.js)
+    // 読み始める前の押しは読み始めの瞬間として扱う
+    this.first.press(p.id, claimed, { others: this.eligible().map((x) => x.id), notBefore: this.reveal.segStart ?? -Infinity });
   }
 
-  decide() {
-    this.collectTimer = null;
-    if (this.phase !== 'reading' || !this.pending.length) return;
+  decide({ winner, pressAt, losers }) {
+    if (this.phase !== 'reading') return;
     this.clearTimers();
-    const first = this.pending.reduce((a, b) => (b.pressAt < a.pressAt ? b : a));
-    const losers = this.pending.filter((x) => x !== first);
-    this.pending = [];
-    this.answerer = first.id;
+    this.answerer = winner;
     this.answerText = null;
-    this.pressAt = first.pressAt;
-    this.reveal = { from: this.shownAt(first.pressAt), segStart: null };
-    this.margin = losers.length ? Math.min(...losers.map((x) => x.pressAt)) - first.pressAt : null;
+    this.pressAt = pressAt;
+    this.reveal = { from: this.shownAt(pressAt), segStart: null };
+    this.margin = losers.length ? losers[0].pressAt - pressAt : null;
     this.setPhase('answer', this.s.answerSeconds * 1000);
     this.later(this.s.answerSeconds * 1000, () => {
       if (this.phase !== 'answer') return;
@@ -343,7 +334,7 @@ class HayaoshiGame {
 
   onConnectionChange() {
     if (this.phase === 'write' && !this.on(this.questioner)) this.startQuestion(this.bankQuestion());
-    else if (this.phase === 'reading' && !this.eligible().length && !this.pending.length) this.endQuestion(null);
+    else if (this.phase === 'reading' && !this.eligible().length && !this.first.pending.length) this.endQuestion(null);
     else if (this.phase === 'judge' && !this.hasJudge()) this.wrong(this.answerText);
   }
 
@@ -440,6 +431,7 @@ module.exports = {
     { key: 'answerSeconds', label: '解答の時間', default: 10, options: [7, 10, 15].map((n) => ({ value: n, label: `${n}秒` })) },
     { key: 'writeSeconds', label: '問題を書く時間', default: 120, options: [60, 120, 180].map((n) => ({ value: n, label: `${n}秒` })) },
   ],
+  client: ['buzz-client.js', 'hayaoshi.js'],
   create: (ctx, settings, playerIds) => new HayaoshiGame(ctx, settings, playerIds),
   _internal: { normalize, splitAnswers },
 };
