@@ -3,7 +3,8 @@
 
   // 名付けカードの画面。
   // カードは「サーバー時計で showAt に出す」と予約付きで届くので、その時刻になってから表にする(全員同時)。
-  // 回答は名前のボタン(設定によっては自由入力も)。押した時刻をサーバーの時計で送り、一番早い人の答えが判定される。
+  // 全員に同じ入力欄があり(初めての絵でも前に出た絵でも同じ見た目)、送信した時刻をサーバーの時計で送る。
+  // 一番早く送った人の答えが判定される。初めての絵なら、出した人の答えが名前になる。
 
   const C = window.NijiCards;
 
@@ -16,9 +17,9 @@
       this.revealTimer = null;
       this.onClickBound = (e) => this.onClick(e);
       root.addEventListener('click', this.onClickBound);
-      const unFlip = NijiBuzz.bindPress(root, '#nz-flip', () => this.api.send('flip'));
-      const unBuzz = NijiBuzz.bindPress(root, '#nz-buzz:not([disabled])', (ev) => this.buzz(ev));
-      this.unbind = () => { unFlip(); unBuzz(); };
+      this.unbind = NijiBuzz.bindPress(root, '#nz-flip', () => this.api.send('flip'));
+      this.draft = { no: null, text: '' }; // 書きかけ(判定のあとで画面を作り直しても消さない)
+      this.sending = 0;
     }
 
     destroy() {
@@ -31,8 +32,8 @@
       if (type === 'nameError') {
         const el = this.root.querySelector('#nz-error');
         if (el) el.textContent = data?.error || '';
-        const btn = this.root.querySelector('#nz-name-send');
-        if (btn) btn.disabled = false;
+        this.sending = 0;
+        if (this.v) this.refresh(this.v);
       }
     }
 
@@ -60,7 +61,7 @@
     // ---------- 組み立て(フェーズが変わったときだけ) ----------
     build(v) {
       const e = this.esc;
-      const label = { flip: 'めくる', name: '名付け', answer: '回答', typing: '回答中', judge: '判定', result: '正解!', miss: '時間切れ', named: '名付け', ended: '最終結果' }[v.phase];
+      const label = { flip: 'めくる', open: '回答', judge: '判定', result: '正解!', miss: '時間切れ', named: '名付け', ended: '最終結果' }[v.phase];
       this.root.innerHTML = `
         <div class="kb nz">
           <div class="kb-head">
@@ -84,11 +85,13 @@
       if (v.card && !this.shown()) {
         this.revealTimer = setTimeout(() => this.update(this.v), Math.max(0, v.card.showAt - this.api.now()) + 10);
       }
-      const input = this.root.querySelector('#nz-name, #nz-free, #nz-type');
+      const input = this.root.querySelector('#nz-ans');
       if (input) {
-        this.api.onEnter(input, () => this.root.querySelector(`#${input.id === 'nz-name' ? 'nz-name' : input.id === 'nz-free' ? 'nz-free' : 'nz-type'}-send`)?.click());
-        // 回答権を取った人はすぐ書けるように、スマホでも入力欄にフォーカスする
-        if (input.id === 'nz-type' || (input.id === 'nz-name' && !matchMedia('(pointer: coarse)').matches)) setTimeout(() => input.focus(), 30);
+        if (this.draft.no === v.card?.no) input.value = this.draft.text;
+        else this.draft = { no: v.card?.no ?? null, text: '' };
+        input.addEventListener('input', () => { this.draft.text = input.value; });
+        this.api.onEnter(input, () => this.send(input.value));
+        if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => input.focus(), 30);
       }
     }
 
@@ -111,52 +114,21 @@
         return `<p class="nz-wait">${e(this.nameOf(v.turnId))}さんがめくるのを待っています</p>
                 ${this.api.isHost() && !v.players.find((p) => p.id === v.turnId)?.connected ? '<button class="btn" id="nz-flip" type="button">代わりにめくる</button>' : ''}`;
       }
-      if (v.phase === 'name') {
-        if (v.card?.by === me) {
-          return `<h3 class="kb-sub">初めて出た絵です。名前をつけてください</h3>
-                  <div class="kt-tip-row">
-                    <input id="nz-name" maxlength="16" placeholder="例:もちもち" autocomplete="off">
-                    <button class="btn btn-primary" id="nz-name-send" type="button">決定</button>
-                  </div>
-                  <div class="nz-suggest"><span class="kt-note">思いつかなければ:</span>${(v.suggestions || []).map((s) => `<button class="btn btn-small" type="button" data-suggest="${e(s)}">${e(s)}</button>`).join('')}</div>
-                  <p class="kt-hint" id="nz-error"></p>`;
-        }
-        return `<p class="nz-wait">初めて出た絵!${e(this.nameOf(v.card?.by))}さんが名前を考えています</p>
-                <p class="kt-note">この絵をよく覚えておきましょう。</p>`;
-      }
-      if (v.phase === 'answer' && v.answerMode === 'buzz') {
-        return `<h3 class="kb-sub">前に出た絵です。名前がわかったら回答権を取ろう</h3>
-                <button class="btn btn-primary btn-block nz-buzz" id="nz-buzz" type="button">回答する!</button>
+      if (v.phase === 'open') {
+        // 初めての絵か前に出た絵かで見た目を変えない
+        return `<h3 class="kb-sub">この絵の名前は?</h3>
+                <div class="kt-tip-row">
+                  <input id="nz-ans" maxlength="40" placeholder="名前を書いて送信" autocomplete="off" enterkeyhint="send">
+                  <button class="btn btn-primary" id="nz-send" type="button">送信</button>
+                </div>
+                ${v.flipper ? `<div class="nz-suggest"><span class="kt-note">名前の候補:</span>${(v.suggestions || []).map((x) => `<button class="btn btn-small" type="button" data-suggest="${e(x)}">${e(x)}</button>`).join('')}</div>` : ''}
+                ${v.names.length ? `<div class="nz-names" id="nz-names">${v.names.map((n) => `<button class="btn nz-name-btn" type="button" data-answer="${e(n)}">${e(n)}</button>`).join('')}</div>` : ''}
+                <p class="kt-hint" id="nz-error"></p>
                 <div class="nz-act-foot">
                   <p class="nz-status" id="nz-status"></p>
                   <button class="btn btn-quiet btn-small" id="nz-pass" type="button">わからない</button>
                 </div>
-                <p class="kt-note">タップ(PCはスペースキー)で回答権。一番早く押した人が名前を書いて答えます。</p>`;
-      }
-      if (v.phase === 'typing') {
-        if (v.typer === me) {
-          return `<h3 class="kb-sub">回答権を取りました!名前を書いてください</h3>
-                  <div class="kt-tip-row">
-                    <input id="nz-type" maxlength="40" placeholder="この絵の名前" autocomplete="off">
-                    <button class="btn btn-primary" id="nz-type-send" type="button">答える</button>
-                  </div>`;
-        }
-        return `<p class="nz-wait">${e(this.nameOf(v.typer))}さんが回答中…</p>`;
-      }
-      if (v.phase === 'answer') {
-        const free = v.answerMode === 'both'
-          ? `<div class="kt-tip-row nz-free-row">
-               <input id="nz-free" maxlength="40" placeholder="書いて答える" autocomplete="off">
-               <button class="btn" id="nz-free-send" type="button">答える</button>
-             </div>`
-          : '';
-        return `<h3 class="kb-sub">前に出た絵です。名前は?</h3>
-                <div class="nz-names" id="nz-names">${v.names.map((n) => `<button class="btn nz-name-btn" type="button" data-answer="${e(n)}">${e(n)}</button>`).join('')}</div>
-                ${free}
-                <div class="nz-act-foot">
-                  <p class="nz-status" id="nz-status"></p>
-                  <button class="btn btn-quiet btn-small" id="nz-pass" type="button">わからない</button>
-                </div>`;
+                <p class="kt-note">${v.flipper ? 'あなたが出したカードです。初めての絵なら、あなたの答えがそのまま名前になります。' : '送信が一番早い人の答えで決まります。'}初めての絵に、出した人以外が答えたり、出した人がすでにある名前を答えたりするとお手つき${v.foul !== 'none' ? '(−1点)' : ''}。</p>`;
       }
       if (v.phase === 'judge' && v.judge) {
         const j = v.judge;
@@ -186,7 +158,7 @@
       }
       if (v.phase === 'named' && v.result) {
         return `<p class="nz-big">「${e(v.result.name)}」</p>
-                <p class="kt-note">${e(this.nameOf(v.result.by))}さんが名付けました。次に出たら、この名前を答えましょう。</p>`;
+                <p class="kt-note">初めての絵でした!${v.result.auto ? '自動で名付けました' : `${e(this.nameOf(v.result.by))}さんが名付けました`}。次に出たら、この名前を答えましょう。</p>`;
       }
       return '';
     }
@@ -237,7 +209,7 @@
         const no = v.card ? `${v.card.no}枚目・${e(this.nameOf(v.card.by))}さんが出した` : '';
         cap.innerHTML = v.phase === 'flip' ? `<b>${e(this.nameOf(v.turnId))}</b>さんの番` : no;
       }
-      if (v.phase === 'answer') this.refreshAnswer(v);
+      if (v.phase === 'open') this.refreshOpen(v);
       if (v.phase === 'judge' && v.judge) {
         const t = this.root.querySelector('#nz-tally');
         if (t) t.textContent = `◯ ${v.judge.yes} ・ ✕ ${v.judge.no}(判定する人 ${v.judge.voters}人、過半数で決定)`;
@@ -247,20 +219,23 @@
       }
     }
 
-    refreshAnswer(v) {
+    refreshOpen(v) {
       const shown = this.shown();
-      const blocked = v.locked || v.passed || v.pressed || !shown;
-      this.root.querySelectorAll('[data-answer], #nz-free-send, #nz-pass, #nz-free, #nz-buzz').forEach((b) => { b.disabled = blocked; });
+      if (v.pressed || v.locked) this.sending = 0;
+      const sending = this.sending && Date.now() - this.sending < 2000;
+      const blocked = v.locked || v.passed || v.pressed || sending || !shown;
+      this.root.querySelectorAll('#nz-ans, #nz-send, #nz-pass, [data-answer], [data-suggest]').forEach((b) => { b.disabled = blocked; });
       const st = this.root.querySelector('#nz-status');
       if (st) {
         const e = this.esc;
-        const wrong = v.lastWrong ? `${e(this.nameOf(v.lastWrong.who))}さんの「${e(v.lastWrong.text)}」は✕。` : '';
+        const lw = v.lastWrong;
+        const wrong = lw ? `${e(this.nameOf(lw.who))}さんの「${e(lw.text)}」は✕${lw.pen ? '(−1点)' : ''}。` : '';
         st.innerHTML = v.locked ? `${wrong}このカードではもう答えられません`
           : v.passed ? 'パスしました'
-          : v.pressed ? (v.answerMode === 'buzz' ? '押しました!' : '答えを送りました…')
-          : v.pending ? `${wrong}誰かが答えています…`
+          : v.pressed || sending ? '送信しました…'
+          : v.pending ? `${wrong}誰かが送信しました…`
           : !shown ? 'めくっています…'
-          : wrong || '一番早く押した人の答えで判定します';
+          : wrong;
       }
     }
 
@@ -269,8 +244,7 @@
       const tag = (p) => {
         if (p.state === 'wrong') return '<span class="tag">✕</span>';
         if (p.state === 'pass') return '<span class="tag">パス</span>';
-        if (p.state === 'pressed') return '<span class="tag tag-done">押した</span>';
-        if (p.state === 'typing') return '<span class="tag tag-done">回答中</span>';
+        if (p.state === 'pressed') return '<span class="tag tag-done">送信</span>';
         return '';
       };
       const list = v.phase === 'ended' ? [...v.players].sort((a, b) => b.score - a.score) : v.players;
@@ -299,55 +273,28 @@
         return;
       }
       if (t.dataset.suggest) {
-        const input = this.root.querySelector('#nz-name');
-        if (input) { input.value = t.dataset.suggest; input.focus(); }
+        const input = this.root.querySelector('#nz-ans');
+        if (input) { input.value = t.dataset.suggest; this.draft.text = input.value; input.focus(); }
         return;
       }
-      if (t.id === 'nz-name-send') {
-        const input = this.root.querySelector('#nz-name');
-        const name = input?.value.trim();
-        const err = this.root.querySelector('#nz-error');
-        if (!name) { if (err) err.textContent = '名前を入れてください'; return input?.focus(); }
-        if (err) err.textContent = '';
-        t.disabled = true;
-        return this.api.send('name', { name });
-      }
-      if (t.dataset.answer != null) return this.sendAnswer(t.dataset.answer, ev, t);
-      if (t.id === 'nz-free-send') {
-        const input = this.root.querySelector('#nz-free');
-        const text = input?.value.trim();
-        if (!text) return input?.focus();
-        return this.sendAnswer(text, ev, t);
-      }
-      if (t.id === 'nz-buzz') {
-        if (ev.detail === 0) this.buzz(ev); // Enter キー。タップとスペースは bindPress が受ける
-        return;
-      }
-      if (t.id === 'nz-type-send') {
-        const input = this.root.querySelector('#nz-type');
-        const text = input?.value.trim();
-        if (!text) return input?.focus();
-        t.disabled = true;
-        return this.api.send('answer', { text });
-      }
+      if (t.id === 'nz-send') return this.send(this.root.querySelector('#nz-ans')?.value);
+      if (t.dataset.answer != null) return this.send(t.dataset.answer);
       if (t.id === 'nz-pass') return this.api.send('pass');
       if (t.dataset.vote != null) return this.api.send('vote', { ok: t.dataset.vote === '1' });
     }
 
-    buzz(ev) {
+    // 送信した瞬間(サーバーの時計)を一緒に送る。一番早い人の答えで決まる
+    send(raw) {
       const v = this.v;
-      if (!v || v.phase !== 'answer' || v.answerMode !== 'buzz' || v.locked || v.passed || v.pressed || !this.shown()) return;
-      const pressAt = NijiBuzz.pressAt(this.api, ev);
-      this.root.querySelectorAll('#nz-buzz, #nz-pass').forEach((b) => { b.disabled = true; });
-      this.api.send('buzz', { pressAt });
-    }
-
-    sendAnswer(text, ev, btn) {
-      const v = this.v;
-      if (v.phase !== 'answer' || v.locked || v.passed || v.pressed || !this.shown()) return;
-      const pressAt = NijiBuzz.pressAt(this.api, ev);
-      btn.classList.add('is-picked');
-      this.root.querySelectorAll('[data-answer], #nz-free-send, #nz-pass').forEach((b) => { b.disabled = true; });
+      const text = String(raw ?? '').trim();
+      const input = this.root.querySelector('#nz-ans');
+      if (!v || v.phase !== 'open' || v.locked || v.passed || v.pressed || !this.shown()) return;
+      if (!text) return input?.focus();
+      const pressAt = this.api.now();
+      const err = this.root.querySelector('#nz-error');
+      if (err) err.textContent = '';
+      this.sending = Date.now();
+      this.refreshOpen(v);
       this.api.send('answer', { text, pressAt });
     }
   }

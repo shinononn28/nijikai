@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
 const { catalog, getGame } = require('./games');
+const { withPace } = require('./games/pace');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 12;
@@ -431,7 +432,8 @@ io.on('connection', (socket) => {
     room.gameId = g.id;
     room.gameSeq++;
     system(room, `「${g.name}」を始めます`);
-    room.game = g.create(makeGameContext(room), room.settings, members);
+    // 「時間の長さ」の倍率を秒数の設定にかけてから渡す(games/pace.js)
+    room.game = g.create(makeGameContext(room), withPace(g, room.settings), members);
     sendRoomState(room);
     sendGameViews(room);
     ack({ ok: true });

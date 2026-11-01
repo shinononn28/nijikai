@@ -2,14 +2,18 @@
 // 1. お題を決める。設定で「ランダム」か「自分で作成」。自分で作ったお題は自分には回ってこない。
 // 2. 隣から回ってきた伝言を、別の言葉で説明して次の人へ渡す。
 //    ただし、その伝言の中で一度でも使われた文字(お題の文字も含む)はもう使えない。お題ごとに使えない文字が増えていく。
-//    1つの伝言の中でも同じ文字は1回まで(「ぺたぺた」は×)。
+//    1つの伝言の中でも同じ文字は1回まで(「ぺたぺた」は×)。伝言に使えるのはひらがな・カタカナだけ。
+//    お題は「表記+よみ」で、使えなくなるのはよみの文字。
+//    さらに伝言ごとに「ダミー」の使えない文字を最初からいくつか混ぜておく。見た目は本物と区別できないので、
+//    「使えない文字 − 回ってきた伝言の文字」から前の伝言(お題)を割り出すことはできない。ダミーは結果発表で明かす。
 // 3. お題→伝言1→伝言2→…と人数分まわったら終わり(作った人には戻らない)。1本ずつ、どう変わったかを公開する。
 //    設定で「最後の人はお題を当てる」にすると、当たった伝言に関わった全員に+1点(言い回し違いはホストかお題を出した人が直せる)。
 //
 // 「同じ文字」の判定は public/games/shibari-rules.js(画面と共通)。
-const { NOUNS } = require('./words');
+const TOPICS = require('./shibari-topics');
 const R = require('../public/games/shibari-rules.js');
 
+const { paceMs } = require('./pace');
 const TOPIC_MS = 40000;
 const GUESS_MS = 45000;
 const GRACE_MS = 2500; // 締め切り直前の自動提出を待つ
@@ -41,10 +45,10 @@ class ShibariGame {
     this.rounds = this.plan.length;
     this.chains = this.order.map((owner) => ({ owner, entries: [], banned: new Set(), judge: null }));
     if (!this.custom) {
-      const pool = [...NOUNS].sort(() => Math.random() - 0.5);
+      const pool = [...TOPICS].sort(() => Math.random() - 0.5);
       this.chains.forEach((c, i) => {
-        const text = pool[i % pool.length];
-        c.entries.push({ type: 'topic', text, by: null, auto: false, fresh: [...R.addAll(c.banned, text, this.fold)].sort(byKana) });
+        const [text, yomi] = pool[i % pool.length];
+        this.setTopic(c, { text, yomi }, null, false);
       });
     }
     this.round = 0;
@@ -72,6 +76,18 @@ class ShibariGame {
     return this.ctx.nameOf(id);
   }
 
+  // お題を伝言の最初に置き、よみの文字とダミーの文字を使えなくする
+  setTopic(c, { text, yomi }, by, auto) {
+    const fresh = [...R.addAll(c.banned, yomi, this.fold)].sort(byKana);
+    c.entries.push({ type: 'topic', text, yomi, by, auto, fresh });
+    // ダミー:まだ使えるひらがなから選ぶ
+    const rows = this.fold.base ? R.BASE_ROWS : R.KANA_ROWS.slice(0, 15); // 小さい字はダミーにしない
+    const pool = [...new Set(rows.join('').replace(/ /g, ''))].map((k) => R.keyOf(k, this.fold)).filter((k) => !c.banned.has(k));
+    const n = Math.min(pool.length, Number(this.s.decoys) || 0);
+    c.decoys = pool.sort(() => Math.random() - 0.5).slice(0, n).sort(byKana);
+    for (const k of c.decoys) c.banned.add(k);
+  }
+
   kind(r = this.round) {
     return this.plan[r];
   }
@@ -91,7 +107,8 @@ class ShibariGame {
     this.phase = 'play';
     this.subs = {};
     const k = this.kind();
-    const ms = k === 'topic' ? TOPIC_MS : k === 'guess' ? GUESS_MS : (Number(this.s.descSec) || 90) * 1000;
+    // お題・当てる時間はここの定数に「時間の長さ」をかける(説明の時間は設定の秒数にかかっている)
+    const ms = k === 'topic' ? paceMs(this.s, TOPIC_MS) : k === 'guess' ? paceMs(this.s, GUESS_MS) : (Number(this.s.descSec) || 90) * 1000;
     this.endsAt = Date.now() + ms;
     this.suggest = {};
     if (k === 'topic') {
@@ -99,8 +116,8 @@ class ShibariGame {
       for (const id of this.order) {
         const list = [];
         while (list.length < 3) {
-          const w = pick(NOUNS);
-          if (!used.has(w)) { used.add(w); list.push(w); }
+          const w = pick(TOPICS);
+          if (!used.has(w[0])) { used.add(w[0]); list.push({ text: w[0], yomi: w[1] }); }
         }
         this.suggest[id] = list;
       }
@@ -116,18 +133,28 @@ class ShibariGame {
     const auto = !!payload.auto;
     if (k === 'topic') {
       const text = clean(payload.text, MAX_TOPIC);
+      let yomi = clean(payload.yomi, 30);
+      if (!yomi && R.kanaOnly(text)) yomi = text;
       if (!R.chars(text, this.fold).length) {
         if (!auto) this.ctx.emitTo(pid, 'error', { error: 'お題を入れてください' });
         return;
       }
-      this.subs[pid] = { text };
+      if (!R.kanaOnly(yomi)) {
+        if (!auto) this.ctx.emitTo(pid, 'error', { error: 'よみをひらがな(カタカナ)で入れてください' });
+        return;
+      }
+      this.subs[pid] = { text, yomi };
     } else if (k === 'desc') {
       const c = this.chains[this.chainFor(pid)];
       let text = clean(payload.text, MAX_DESC);
       const pr = R.problems(text, c.banned, this.fold);
-      const bad = [...pr.used, ...pr.repeated];
+      const bad = [...pr.used, ...pr.repeated, ...pr.other];
       if (bad.length) {
-        const msg = [pr.used.length ? `使えない文字:${pr.used.join(' ')}` : '', pr.repeated.length ? `同じ文字を2回使っています:${pr.repeated.join(' ')}` : ''].filter(Boolean).join(' / ');
+        const msg = [
+          pr.used.length ? `使えない文字:${pr.used.join(' ')}` : '',
+          pr.repeated.length ? `同じ文字を2回使っています:${pr.repeated.join(' ')}` : '',
+          pr.other.length ? `ひらがな・カタカナ以外は使えません:${pr.other.join(' ')}` : '',
+        ].filter(Boolean).join(' / ');
         if (!auto) return this.ctx.emitTo(pid, 'error', { error: msg });
         text = R.strip(text, c.banned, this.fold); // 時間切れのときは、使えない文字を消して出す
       }
@@ -151,10 +178,13 @@ class ShibariGame {
     for (const id of this.order) {
       const c = this.chains[this.chainFor(id)];
       let sub = this.subs[id];
-      if (!sub) sub = k === 'topic' ? { text: this.suggest[id]?.[0] || 'りんご', auto: true } : { text: '', auto: true };
-      if (!sub.text && k !== 'topic') sub.text = '';
+      if (!sub) sub = k === 'topic' ? { ...(this.suggest[id]?.[0] || { text: 'りんご', yomi: 'りんご' }), auto: true } : { text: '', auto: true };
+      if (k === 'topic') {
+        this.setTopic(c, sub, id, !!sub.auto);
+        continue;
+      }
       const before = new Set(c.banned);
-      if (k !== 'guess') R.addAll(c.banned, sub.text, this.fold);
+      if (k === 'desc') R.addAll(c.banned, sub.text, this.fold);
       const fresh = [...c.banned].filter((x) => !before.has(x)).sort(byKana);
       c.entries.push({ type: k, text: sub.text, by: id, auto: !!sub.auto, fresh });
     }
@@ -167,9 +197,9 @@ class ShibariGame {
   startReveal() {
     this.clearTimers();
     for (const c of this.chains) {
-      const topic = c.entries[0]?.text;
+      const topic = c.entries[0];
       const guess = c.entries[c.entries.length - 1]?.text;
-      c.auto = this.guess && R.sameAnswer(topic, guess);
+      c.auto = this.guess && (R.sameAnswer(topic?.text, guess) || R.sameAnswer(topic?.yomi, guess));
     }
     this.phase = 'reveal';
     this.revealChain = 0;
@@ -300,7 +330,7 @@ class ShibariGame {
       const prev = this.lastText(c);
       v.task = {
         kind: k,
-        prev: prev ? { text: prev.text, isTopic: prev.type === 'topic' } : null,
+        prev: prev ? { text: prev.text, yomi: prev.type === 'topic' ? prev.yomi : null, isTopic: prev.type === 'topic' } : null,
         banned: k === 'desc' ? [...c.banned].sort(byKana) : null,
         step: k === 'desc' ? this.round + (this.custom ? 0 : 1) : null,
       };
@@ -323,6 +353,7 @@ class ShibariGame {
           return {
             owner: this.name(c.owner),
             ownerId: c.owner,
+            decoys: c.decoys || [],
             total: c.entries.length,
             done: shown,
             correct: this.guess && shown ? this.isCorrect(c) : null,
@@ -330,7 +361,7 @@ class ShibariGame {
             canJudge: this.guess && shown && (this.ctx.hostId() === pid || (this.custom && c.owner === pid)),
             entries: c.entries.slice(0, ended || ci < this.revealChain ? c.entries.length : this.revealStep + 1).map((e, si) => {
               const set = this.likes[`${ci}-${si}`];
-              return { type: e.type, text: e.text, auto: e.auto, fresh: e.fresh, byName: e.by ? this.name(e.by) : null, likes: set ? set.size : 0, liked: !!set?.has(pid) };
+              return { type: e.type, text: e.text, yomi: e.yomi || null, auto: e.auto, fresh: e.fresh, byName: e.by ? this.name(e.by) : null, likes: set ? set.size : 0, liked: !!set?.has(pid) };
             }),
           };
         }),
@@ -355,8 +386,8 @@ module.exports = {
   name: '文字しばり伝言',
   tagline: '同じ伝言の中で一度使われた文字はもう使えない。言い換えて言い換えてお題を届ける。',
   description:
-    'お題(ランダムか、自分で作成)を全員同時に隣へ回します。受け取った人はその内容を別の言葉で言い換えて次へ。ただし、その伝言の中で一度でも使われた文字(お題の文字も)はもう使えず、自分の伝言の中でも同じ文字は1回まで。' +
-    '使えない文字はお題ごとに増えていき、五十音表で確認できます。人数分まわったら終わりで、自分で作ったお題は自分には回ってきません。最後に1本ずつ、お題がどう変わったかを公開します。',
+    'お題(ランダムか、自分で作成)を全員同時に隣へ回します。受け取った人はその内容を別の言葉で言い換えて次へ。ただし、その伝言の中で一度でも使われた文字(お題の読みも)はもう使えず、自分の伝言の中でも同じ文字は1回まで。伝言はひらがな・カタカナだけで書きます。' +
+    '使えない文字はお題ごとに増えていき、五十音表で確認できます(最初からダミーも混ざっているので、前の伝言は割り出せません)。人数分まわったら終わりで、自分で作ったお題は自分には回ってきません。最後に1本ずつ、お題がどう変わったかを公開します。',
   minPlayers: 3,
   maxPlayers: 12,
   cpu: false,
@@ -377,6 +408,17 @@ module.exports = {
       options: [
         { value: 'all', label: '全員(人数分まわす)' },
         ...[2, 3, 4, 5, 6].map((n) => ({ value: n, label: `${n}人まで` })),
+      ],
+    },
+    {
+      key: 'decoys',
+      label: 'ダミーの使えない文字',
+      default: 6,
+      options: [
+        { value: 0, label: 'なし(前の伝言を推理されやすい)' },
+        { value: 4, label: '4字' },
+        { value: 6, label: '6字' },
+        { value: 10, label: '10字(むずかしい)' },
       ],
     },
     {

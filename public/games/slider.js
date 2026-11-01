@@ -87,7 +87,7 @@
       this.root.querySelector('#sl-score').innerHTML = `
         <h3 class="kb-sub">得点</h3>
         <ul class="kt-team">${v.players.map((p) => `<li><span class="player-name">${e(p.name)}</span>${p.target ? '<span class="tag tag-host">答える人</span>' : ''}${status(p)}<span class="kt-tickets">${p.score}点</span></li>`).join('')}</ul>
-        <p class="kt-note">差5以内で5点・10以内で3点・20以内で2点・30以内で1点。答えた人には、差15以内まで近づけた人数だけ得点。</p>`;
+        <p class="kt-note">差5以内で5点・10以内で3点・20以内で2点・30以内で1点。ぴったり当てたら+3点のボーナス(0や100もOK)。答える人には得点なし。</p>`;
     }
 
     renderResult(v) {
@@ -106,8 +106,7 @@
         <div class="kt-panel sl-panel">
           <p class="sl-q"><b>${e(v.targetName)}</b>さんは <b class="sl-big">${r.truth ?? '?'}</b></p>
           ${this.track(v.spectrum, `${markers}${truth}`)}
-          <ul class="sl-list">${[...r.guesses].sort((a, b) => (a.diff ?? 999) - (b.diff ?? 999)).map((g) => `<li><span class="player-name">${e(g.name)}</span><span>予想${g.value}</span><span>差${g.diff ?? '-'}</span><b>+${g.pts}</b></li>`).join('')}</ul>
-          <p class="kt-note">${e(v.targetName)}さん:差15以内まで近づいた${r.understood}人ぶん +${r.understood}</p>
+          <ul class="sl-list">${[...r.guesses].sort((a, b) => (a.diff ?? 999) - (b.diff ?? 999)).map((g) => `<li><span class="player-name">${e(g.name)}</span><span>予想${g.value}${g.exact ? ' <b class="sl-exact">ぴったり!</b>' : ''}</span><span>差${g.diff ?? '-'}</span><b>+${g.pts}</b></li>`).join('')}</ul>
           ${v.phase === 'ended' ? this.endHtml(v) : this.api.isHost() ? '<button class="btn btn-primary btn-block" data-act="next">次の人へ</button>' : '<p class="hint wait">ホストが次へ進めます</p>'}
         </div>`;
     }

@@ -4,6 +4,7 @@
 // 少数派が1人だけなら点数2倍。同数で少数派が決まらない・全員同じ、なら誰も得点なし。
 // 設定で「事前宣言」(守らなくていい宣言を先に公開する)を入れられる。
 
+const { paceMs } = require('./pace');
 const LABELS = ['A', 'B', 'C'];
 const CPU_NAMES = ['ハル', 'ナギ', 'ソラ'];
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
@@ -64,7 +65,7 @@ class TasuketsuGame {
     this.declares = {};
     this.votes = {};
     this.result = null;
-    if (this.s.declare) this.startPhase('declare', 20000, () => this.startVote());
+    if (this.s.declare) this.startPhase('declare', paceMs(this.s, 20000), () => this.startVote());
     else this.startVote();
   }
 

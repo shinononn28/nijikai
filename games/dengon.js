@@ -4,6 +4,7 @@
 // 3. 最後に1本ずつ、元の文からどう変わっていったかを順番に公開する。気に入った作品には「いいね」
 const { NOUNS } = require('./words');
 
+const { paceMs } = require('./pace');
 const GRACE_MS = 2500; // 締め切り直前の自動提出を待つ
 const ACTIONS = [
   'が空を飛んでいる', 'が泣いている', 'がパーティーをしている', 'が怒っている', 'が寝ている', 'が走っている', 'が踊っている',
@@ -82,7 +83,7 @@ class DengonGame {
     this.phase = 'play';
     this.subs = {};
     const k = this.kind();
-    const sec = k === 'draw' ? this.s.drawSeconds : k === 'write' ? 60 : this.s.textSeconds;
+    const sec = k === 'draw' ? this.s.drawSeconds : k === 'write' ? paceMs(this.s, 60000) / 1000 : this.s.textSeconds;
     this.endsAt = Date.now() + sec * 1000;
     this.suggest = {};
     if (k === 'write') for (const id of this.order) this.suggest[id] = [0, 1, 2].map(() => `${pick(NOUNS)}${pick(ACTIONS)}`);

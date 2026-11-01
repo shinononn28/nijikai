@@ -3,6 +3,7 @@
 // 正解はチャットから自動判定し、正解の言葉は伏せて「正解!」に置き換える。早く当てた人ほど高得点、当てられた出題者にも得点。
 const { NOUNS } = require('./words');
 
+const { paceMs } = require('./pace');
 const CHOOSE_MS = 15000;
 const REVEAL_MS = 6000;
 
@@ -91,9 +92,9 @@ class OekakiGame {
     this.guesses = []; // 出題者が手で判定するための回答の記録
     this.guessSeq = 0;
     this.phase = 'choose';
-    this.endsAt = Date.now() + CHOOSE_MS;
+    this.endsAt = Date.now() + paceMs(this.s, CHOOSE_MS);
     this.seq++;
-    this.later(CHOOSE_MS, () => this.choose(this.drawer, this.choices[0]));
+    this.later(paceMs(this.s, CHOOSE_MS), () => this.choose(this.drawer, this.choices[0]));
     this.broadcast('clear', {});
     this.ctx.update();
   }

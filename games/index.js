@@ -33,6 +33,13 @@ const catalog = [
   course,
 ];
 
+// 全ゲーム共通の「時間の長さ」の設定欄を足す(games/pace.js)
+const { SETTING: PACE } = require('./pace');
+for (const g of catalog) {
+  g.settings = g.settings || [];
+  if (!g.settings.some((f) => f.key === PACE.key)) g.settings.push(PACE);
+}
+
 const getGame = (id) => catalog.find((g) => g.id === id) || null;
 
 module.exports = { catalog, getGame };

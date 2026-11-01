@@ -1148,3 +1148,10 @@ th:not(:first-child) { text-align: right; }
 .sb-fresh { font-size: 0.75rem; color: var(--muted); }
 .sb-judge { display: flex; justify-content: flex-end; }
 .sb-preview mark.is-repeat { background: #ffe9c2; color: #a35a00; }
+.sb-preview mark.is-other { background: #e4e0f5; color: #5b3fa6; }
+.sb-yomi { display: block; font-size: 0.85rem; font-weight: 500; color: var(--muted); font-family: var(--font-body); }
+.sb-topic-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; align-items: end; }
+.sb-topic-form label { display: grid; gap: 0.15rem; }
+.sb-topic-form input { font-size: 1.05rem; padding: 0.6em 0.8em; border: 2px solid var(--line); border-radius: var(--radius-ctl); background: #fff; color: var(--ink); min-width: 0; }
+@media (max-width: 560px) { .sb-topic-form { grid-template-columns: 1fr; } }
+.sl-exact { color: var(--red); font-size: 0.8rem; }

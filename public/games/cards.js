@@ -238,6 +238,13 @@
     const n = Number(setting);
     return Number.isFinite(n) && n > 0 ? Math.round(n) : autoDeckSize(players);
   }
+  // 何種類の絵柄を使うか。人数に合わせて増やし、少しランダムにぶらす(2人8〜11種類・4人12〜15種類・6人16〜19種類…)
+  // level: 'few' 少なめ / 'many' 多め / それ以外はふつう
+  function autoKinds(players, rng = Math.random, level = 'auto') {
+    const base = 4 + 2 * Math.max(1, players) + randInt(rng, 0, 3);
+    const mul = level === 'few' ? 0.7 : level === 'many' ? 1.4 : 1;
+    return Math.max(3, Math.round(base * mul));
+  }
   // 1種類あたりの上限枚数。山札が大きいほど多くなる(30枚→4、50枚→6、80枚→10)
   function maxCopiesFor(size, minCopies = 2) {
     return Math.max(minCopies + 1, Math.round(size / 8));
@@ -249,7 +256,7 @@
   }
 
   // 山札を作る。返り値 { cards: [id...](シャッフル済み), counts: { id: 枚数 }, kinds: 使った絵柄の数, unused: 使わなかった id }
-  // options: size(合計枚数), pool(絵柄の id の配列), minCopies(既定2), maxCopies(既定は size から), rng(既定 Math.random),
+  // options: size(合計枚数), pool(絵柄の id の配列), kinds(使う種類の数の目安), minCopies(既定2), maxCopies(既定は size から), rng(既定 Math.random),
   //          mysteryShare(正体不明の割合 0〜1。省略時は絵柄をそのまま混ぜて選ぶ)
   function buildDeck(options = {}) {
     const rng = options.rng || Math.random;
@@ -261,7 +268,8 @@
     maxCopies = Math.max(maxCopies, Math.ceil(size / kinds.length)); // 絵柄が少なすぎるときは上限を上げる
     const kMin = Math.max(1, Math.ceil(size / maxCopies));
     const kMax = Math.max(kMin, Math.min(kinds.length, Math.floor(size / minCopies)));
-    const k = randInt(rng, kMin, kMax);
+    // 種類の数:指定があればそれに近づける(山札の枚数から無理のない範囲に収める)。なければ範囲内でランダム
+    const k = options.kinds ? Math.max(kMin, Math.min(kMax, Math.round(options.kinds))) : randInt(rng, kMin, kMax);
     // 使う絵柄を選ぶ(正体不明の割合の指定があればそれに寄せる)
     let chosen;
     if (typeof options.mysteryShare === 'number') {
@@ -306,17 +314,29 @@
         { value: 'mystery', label: 'なぞの絵だけ(むずかしい)' },
       ],
     },
+    {
+      key: 'kinds',
+      label: '絵柄の種類',
+      default: 'auto',
+      options: [
+        { value: 'auto', label: '人数に合わせる(少しランダム)' },
+        { value: 'few', label: '少なめ(同じ絵がよく出る)' },
+        { value: 'many', label: '多め(覚えることが増える)' },
+      ],
+    },
   ];
   // settings から山札を作る近道
   function deckFromSettings(settings, players, rng) {
     const kind = settings?.cardPool;
     const mysteryShare = kind === 'mysteryMost' ? 0.7 : undefined;
-    return buildDeck({ size: deckSize(players, settings?.deckSize), pool: pool(kind), mysteryShare, rng });
+    const r = rng || Math.random;
+    const kinds = autoKinds(players, r, settings?.kinds);
+    return buildDeck({ size: deckSize(players, settings?.deckSize), pool: pool(kind), kinds, mysteryShare, rng: r });
   }
 
   return {
     NOUNS, MYSTERY, ALL, get, render, mysterySvg, pool,
-    autoDeckSize, deckSize, maxCopiesFor, buildDeck, deckFromSettings, SETTINGS,
+    autoDeckSize, autoKinds, deckSize, maxCopiesFor, buildDeck, deckFromSettings, SETTINGS,
     mulberry32, shuffle,
   };
 });

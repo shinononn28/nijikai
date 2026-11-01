@@ -3,6 +3,7 @@
 // そのあと全員が経路を計画して一斉にスタート。ゴールした人に得点、ただし全員ゴールしたら誰も得点なし。
 // キャラクターごとに動き方が違うので「自分は通れて相手は通れない」コースを作れる。
 
+const { paceMs } = require('./pace');
 const { W, H, START, CHARS, ITEMS, simulate, key, inside } = require('../public/games/course-sim.js');
 
 // 部品の出やすさ(消しゴムは少人数だと強すぎるので出にくく、1人の手札に1つまで)
@@ -100,9 +101,9 @@ class CourseGame {
     this.plans = {};
     this.run = null;
     this.phase = 'pick';
-    this.endsAt = Date.now() + 25000;
+    this.endsAt = Date.now() + paceMs(this.s, 25000);
     this.seq++;
-    this.later(25000, () => {
+    this.later(paceMs(this.s, 25000), () => {
       for (const p of this.players) if (!this.picks[p.id]) this.picks[p.id] = pick(this.hands[p.id]).type;
       this.startPlace();
     });
@@ -133,9 +134,9 @@ class CourseGame {
     while (this.orderIndex < this.order.length && (!this.p(this.order[this.orderIndex]) || !this.picks[this.order[this.orderIndex]])) this.orderIndex++;
     if (this.orderIndex >= this.order.length) return this.startPlan();
     this.placer = this.order[this.orderIndex];
-    this.endsAt = Date.now() + 40000;
+    this.endsAt = Date.now() + paceMs(this.s, 40000);
     this.clearTimers();
-    this.later(40000, () => {
+    this.later(paceMs(this.s, 40000), () => {
       this.ctx.system(`${this.name(this.placer)}さんは時間切れで部品を置かなかった`);
       this.orderIndex++;
       this.nextPlacer();

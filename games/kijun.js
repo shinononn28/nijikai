@@ -15,7 +15,8 @@ function shuffle(arr) {
 }
 const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 20);
 
-const PHASE_MS = { prepare: 75000, ask: 40000, answer: 30000, final: 60000, rank: 90000 };
+const { paceMs } = require('./pace');
+const BASE_PHASE_MS = { prepare: 75000, ask: 40000, answer: 30000, final: 60000, rank: 90000 };
 const HAND = 5; // 手札の枚数
 const CANDS = 8; // 用意された候補の数
 const REROLLS = 3; // 候補の引き直し回数
@@ -25,6 +26,7 @@ class KijunGame {
   constructor(ctx, settings, humanIds) {
     this.ctx = ctx;
     this.s = settings;
+    this.ms = Object.fromEntries(Object.entries(BASE_PHASE_MS).map(([k, v]) => [k, paceMs(settings, v)]));
     this.timers = new Set();
     this.players = shuffle(humanIds).map((id) => ({ id, score: 0 }));
     this.order = []; // 親の順番
@@ -117,8 +119,8 @@ class KijunGame {
     this.verdicts = {};
     this.roundResult = null;
 
-    this.setPhase('prepare', PHASE_MS.prepare);
-    this.later(PHASE_MS.prepare, () => this.startAsk());
+    this.setPhase('prepare', this.ms.prepare);
+    this.later(this.ms.prepare, () => this.startAsk());
     this.ctx.system(`第${this.roundIndex + 1}ラウンド。親は${this.name(this.parent)}さん。基準を選んでいます`);
     this.ctx.update();
   }
@@ -178,8 +180,8 @@ class KijunGame {
     if (!this.askQueue.length) return this.startFinal();
     this.asker = this.askQueue.shift();
     this.pending = null;
-    this.setPhase('ask', PHASE_MS.ask);
-    this.later(PHASE_MS.ask, () => {
+    this.setPhase('ask', this.ms.ask);
+    this.later(this.ms.ask, () => {
       this.ctx.system(`${this.name(this.asker)}さんは時間切れで指名をパスした`);
       this.nextAsk();
     });
@@ -195,8 +197,8 @@ class KijunGame {
     const a = A.w;
     const b = B.w;
     this.pending = { a, b, aId, bId, by: pid };
-    this.setPhase('answer', PHASE_MS.answer);
-    this.later(PHASE_MS.answer, () => this.answer(this.parent, null));
+    this.setPhase('answer', this.ms.answer);
+    this.later(this.ms.answer, () => this.answer(this.parent, null));
     this.ctx.system(`${this.name(pid)}さん:「${a}」と「${b}」、どっちが上?`);
     this.ctx.update();
   }
@@ -215,8 +217,8 @@ class KijunGame {
   startFinal() {
     this.asker = null;
     this.pending = null;
-    this.setPhase('final', PHASE_MS.final);
-    this.later(PHASE_MS.final, () => this.startRank());
+    this.setPhase('final', this.ms.final);
+    this.later(this.ms.final, () => this.startRank());
     this.ctx.system('最後の勝負。基準に一番合うと思う手札を1枚出してください(基準の予想も書けます)');
     this.ctx.update();
   }
@@ -235,8 +237,8 @@ class KijunGame {
     for (const c of this.children()) if (!this.finals[c.id] && this.hands[c.id]?.length) this.finals[c.id] = { word: this.hands[c.id][0].w, cardId: this.hands[c.id][0].id, guess: '', auto: true };
     // 親には誰の札かわからないように並べ替えて見せる
     this.rankOrder = shuffle(Object.keys(this.finals));
-    this.setPhase('rank', PHASE_MS.rank);
-    this.later(PHASE_MS.rank, () => this.decide(this.parent, null, null));
+    this.setPhase('rank', this.ms.rank);
+    this.later(this.ms.rank, () => this.decide(this.parent, null, null));
     this.ctx.update();
   }
 

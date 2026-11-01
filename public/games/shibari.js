@@ -65,6 +65,8 @@
         const input = this.root.querySelector('#sb-text');
         if (input) {
           this.api.onEnter(input, () => this.send());
+          const yomi = this.root.querySelector('#sb-yomi');
+          if (yomi) this.api.onEnter(yomi, () => this.send());
           if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => input.focus(), 30);
           this.check();
         }
@@ -87,15 +89,19 @@
         return `
           <div class="kt-panel dg-task">
             <h3 class="kb-sub">お題を作ってください(このお題は自分には回ってきません)</h3>
-            <div class="answer-entry"><input id="sb-text" maxlength="20" placeholder="例:ペンギン" autocomplete="off"><button class="btn btn-primary" data-act="send">決定</button></div>
-            <div class="dg-suggest"><span class="kt-note">思いつかなければ:</span>${(v.suggest || []).map((s) => `<button class="btn btn-small" data-suggest="${e(s)}">${e(s)}</button>`).join('')}</div>
-            <p class="kt-note">お題の文字は、この伝言ではもう誰も使えなくなります。</p>
+            <div class="sb-topic-form">
+              <label><span class="kt-note">お題</span><input id="sb-text" maxlength="20" placeholder="例:冷蔵庫" autocomplete="off"></label>
+              <label><span class="kt-note">よみ(ひらがな)</span><input id="sb-yomi" maxlength="30" placeholder="例:れいぞうこ" autocomplete="off"></label>
+              <button class="btn btn-primary" data-act="send">決定</button>
+            </div>
+            <div class="dg-suggest"><span class="kt-note">思いつかなければ:</span>${(v.suggest || []).map((s) => `<button class="btn btn-small" data-suggest="${e(s.text)}" data-yomi="${e(s.yomi)}">${e(s.text)}</button>`).join('')}</div>
+            <p class="kt-note">よみの文字は、この伝言ではもう誰も使えなくなります。お題がひらがな・カタカナだけなら、よみは空でも大丈夫です。</p>
             <p class="kt-hint" id="sb-error"></p>
             <p class="dg-sent" id="sb-sent"></p>
           </div>`;
       }
       const prev = t.prev
-        ? `<p class="dg-prompt"><span class="kj-label">${t.prev.isTopic ? 'お題' : `${e(v.from || '')}さんからの伝言`}</span><b>${e(t.prev.text)}</b></p>`
+        ? `<p class="dg-prompt"><span class="kj-label">${t.prev.isTopic ? 'お題' : `${e(v.from || '')}さんからの伝言`}</span><b>${e(t.prev.text)}</b>${t.prev.yomi && t.prev.yomi !== t.prev.text ? `<small class="sb-yomi">(${e(t.prev.yomi)})</small>` : ''}</p>`
         : '<p class="dg-prompt"><b>(何も届きませんでした)</b></p>';
       if (t.kind === 'guess') {
         return `
@@ -111,7 +117,7 @@
         <div class="kt-panel dg-task">
           ${prev}
           <h3 class="kb-sub">別の言葉で言い換えて、次の人に伝えてください(${t.step}人目 / ${v.steps}人)</h3>
-          <div class="answer-entry"><input id="sb-text" maxlength="40" placeholder="使える文字だけで書く" autocomplete="off"><button class="btn btn-primary" data-act="send" id="sb-send">決定</button></div>
+          <div class="answer-entry"><input id="sb-text" maxlength="40" placeholder="ひらがな・カタカナで書く" autocomplete="off"><button class="btn btn-primary" data-act="send" id="sb-send">決定</button></div>
           <p class="sb-preview" id="sb-preview" aria-live="polite"></p>
           <p class="kt-hint" id="sb-error"></p>
           <p class="dg-sent" id="sb-sent"></p>
@@ -131,7 +137,7 @@
           <summary>使えない文字(${list.length}字)${fold ? '' : '・カタカナは別に数えます'}</summary>
           <div class="sb-grid">${grid}</div>
           ${others.length ? `<div class="sb-others"><span class="kt-note">ほかに:</span>${others.map((c) => `<span class="sb-chip">${e(c)}</span>`).join('')}</div>` : ''}
-          <p class="kt-note">自分の伝言の中でも同じ文字は1回まで。記号・空白・のばし棒「ー」はいつでも使えます。${fold ? 'ひらがなとカタカナは同じ文字として数えます。' : ''}${opts.base ? '濁点・半濁点・小さい字は元の字と同じ文字です(「か」が×なら「が」も×)。' : ''}</p>
+          <p class="kt-note">最初からダミーの字も混ざっています。ひらがな・カタカナだけで、自分の伝言の中でも同じ文字は1回まで。記号・空白・のばし棒「ー」はいつでも使えます。${fold ? 'ひらがなとカタカナは同じ文字として数えます。' : ''}${opts.base ? '濁点・半濁点・小さい字は元の字と同じ文字です(「か」が×なら「が」も×)。' : ''}</p>
         </details>`;
     }
 
@@ -142,16 +148,17 @@
       if (!input || v?.phase !== 'play' || v.task?.kind !== 'desc') return;
       const marks = R.mark(input.value, v.task.banned, v.opts);
       const pr = R.problems(input.value, v.task.banned, v.opts);
-      const bad = [...pr.used, ...pr.repeated];
+      const bad = [...pr.used, ...pr.repeated, ...pr.other];
       const prev = this.root.querySelector('#sb-preview');
       if (prev) {
         const e = this.esc;
         const msgs = [
+          pr.other.length ? `ひらがな・カタカナだけ:${pr.other.map(e).join(' ')}` : '',
           pr.used.length ? `使えない文字:${pr.used.map(e).join(' ')}` : '',
           pr.repeated.length ? `同じ文字は1回まで:${pr.repeated.map(e).join(' ')}` : '',
         ].filter(Boolean);
         prev.innerHTML = input.value
-          ? marks.map((m) => (m.bad ? `<mark class="${m.repeat ? 'is-repeat' : ''}">${e(m.ch)}</mark>` : e(m.ch))).join('') +
+          ? marks.map((m) => (m.bad ? `<mark class="${m.other ? 'is-other' : m.repeat ? 'is-repeat' : ''}">${e(m.ch)}</mark>` : e(m.ch))).join('') +
             (msgs.length ? msgs.map((x) => `<span class="sb-bad">${x}</span>`).join('') : '<span class="sb-ok">OK</span>')
           : '';
       }
@@ -201,9 +208,10 @@
           ${c.entries.map((x, si) => `
             <div class="dg-entry dg-e-text${grew && ci === r.chain && si === c.entries.length - 1 ? ' is-new' : ''}">
               <span class="dg-by">${label(x, si)}</span>
-              <p class="dg-text${x.type === 'topic' ? ' sb-topic' : ''}">${x.text ? e(x.text) : '<span class="kt-note">(時間切れ)</span>'}</p>
+              <p class="dg-text${x.type === 'topic' ? ' sb-topic' : ''}">${x.text ? e(x.text) : '<span class="kt-note">(時間切れ)</span>'}${x.yomi && x.yomi !== x.text ? `<small class="sb-yomi">(${e(x.yomi)})</small>` : ''}</p>
               ${x.auto && x.text && x.type === 'desc' ? '<span class="kt-note">時間切れで、使えない文字を消して提出</span>' : ''}
               ${x.type !== 'guess' && x.fresh?.length ? `<span class="sb-fresh">使えなくなった字:${x.fresh.map((ch) => e(ch)).join(' ')}</span>` : ''}
+              ${x.type === 'topic' && c.decoys.length ? `<span class="sb-fresh">ダミーで使えなかった字:${c.decoys.map((ch) => e(ch)).join(' ')}</span>` : ''}
               ${x.byName ? `<button class="dg-like${x.liked ? ' is-on' : ''}" data-like="${ci}-${si}" aria-label="いいね">❤ ${x.likes || ''}</button>` : ''}
             </div>`).join('')}
           ${c.canJudge ? `<div class="sb-judge">${c.correct ? `<button class="btn btn-small" data-judge="${ci}" data-ok="0">不正解にする</button>` : `<button class="btn btn-small btn-primary" data-judge="${ci}" data-ok="1">正解にする</button>`}</div>` : ''}
@@ -240,6 +248,16 @@
       }
       if (!auto && v.task?.kind === 'desc' && R.violations(text, v.task.banned, v.opts).length) return this.check();
       const err = this.root.querySelector('#sb-error');
+      if (v.task?.kind === 'topic') {
+        const yomiEl = this.root.querySelector('#sb-yomi');
+        const yomi = yomiEl?.value.trim() || '';
+        if (!auto && !(yomi ? R.kanaOnly(yomi) : R.kanaOnly(text))) {
+          if (err) err.textContent = yomi ? 'よみはひらがな(カタカナ)だけで書いてください' : 'お題に漢字などがあるときは、よみも入れてください';
+          return yomiEl?.focus();
+        }
+        if (err && !auto) err.textContent = '';
+        return this.api.send('submit', { text, yomi, auto });
+      }
       if (err && !auto) err.textContent = '';
       this.api.send('submit', { text, auto });
     }
@@ -259,6 +277,8 @@
       if (t.dataset.suggest) {
         const input = this.root.querySelector('#sb-text');
         if (input) { input.value = t.dataset.suggest; input.focus(); }
+        const yomi = this.root.querySelector('#sb-yomi');
+        if (yomi) yomi.value = t.dataset.yomi || '';
         return;
       }
       const act = t.dataset.act;

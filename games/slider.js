@@ -14,7 +14,8 @@ const SPECTRUMS = [
   ['占いを信じる', '占いは信じない'], ['恋愛は追う', '恋愛は追われる'], ['LINEの返信が早い', 'LINEの返信が遅い'], ['旅行はきっちり予定', '旅行はノープラン'], ['ラーメンはあっさり', 'ラーメンはこってり'],
 ];
 
-const PHASE_MS = { topic: 35000, answer: 45000 };
+const { paceMs } = require('./pace');
+const BASE_PHASE_MS = { topic: 35000, answer: 45000 };
 const shuffle = (arr) => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -25,12 +26,16 @@ const shuffle = (arr) => {
 };
 const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 20);
 // 予想と本人の位置の差 → 得点
-const pointsFor = (d) => (d <= 5 ? 5 : d <= 10 ? 3 : d <= 20 ? 2 : d <= 30 ? 1 : 0);
+// ぴったり(差0)なら +3 のボーナス。0や100を当てたときもこれに入る
+// (差5以内が満点なので、ボーナスがないと「100だと思っても95に置くのが無難」になってしまう)
+const EXACT_BONUS = 3;
+const pointsFor = (d) => (d === 0 ? 5 + EXACT_BONUS : d <= 5 ? 5 : d <= 10 ? 3 : d <= 20 ? 2 : d <= 30 ? 1 : 0);
 
 class SliderGame {
   constructor(ctx, settings, humanIds) {
     this.ctx = ctx;
     this.s = settings;
+    this.ms = { topic: paceMs(settings, BASE_PHASE_MS.topic), answer: paceMs(settings, BASE_PHASE_MS.answer) };
     this.timers = new Set();
     this.players = humanIds.map((id) => ({ id, score: 0 }));
     this.order = [];
@@ -77,9 +82,9 @@ class SliderGame {
     this.values = {};
     this.result = null;
     this.phase = 'topic';
-    this.endsAt = Date.now() + PHASE_MS.topic;
+    this.endsAt = Date.now() + this.ms.topic;
     this.seq++;
-    this.later(PHASE_MS.topic, () => this.setSpectrum(this.target, this.options[0]));
+    this.later(this.ms.topic, () => this.setSpectrum(this.target, this.options[0]));
     this.ctx.update();
   }
 
@@ -91,9 +96,9 @@ class SliderGame {
     this.clearTimers();
     this.spectrum = { left, right, custom };
     this.phase = 'answer';
-    this.endsAt = Date.now() + PHASE_MS.answer;
+    this.endsAt = Date.now() + this.ms.answer;
     this.seq++;
-    this.later(PHASE_MS.answer, () => this.reveal());
+    this.later(this.ms.answer, () => this.reveal());
     this.ctx.system(`${this.name(pid)}さんの物差しは「${left} ⇔ ${right}」。${this.name(pid)}さんはどのへん?`);
     this.ctx.update();
   }
@@ -113,24 +118,22 @@ class SliderGame {
     const guesses = this.players
       .filter((p) => p.id !== this.target && this.values[p.id] !== undefined)
       .map((p) => {
-        const d = truth === undefined ? null : Math.abs(this.values[p.id] - truth);
+        const value = this.values[p.id];
+        const d = truth === undefined ? null : Math.abs(value - truth);
         const pts = d === null ? 0 : pointsFor(d);
         p.score += pts;
-        return { id: p.id, name: this.name(p.id), value: this.values[p.id], diff: d, pts };
+        return { id: p.id, name: this.name(p.id), value, diff: d, pts, exact: d === 0 };
       });
-    // 答えた人は、よく分かってもらえた(差が15以内の)人数だけ得点
-    const understood = guesses.filter((g) => g.diff !== null && g.diff <= 15).length;
-    const tp = this.p(this.target);
-    if (tp && truth !== undefined) tp.score += understood;
+    // 答えた人には得点なし
     const best = [...guesses].sort((a, b) => (a.diff ?? 999) - (b.diff ?? 999))[0];
-    this.result = { truth: truth ?? null, guesses, understood, best: best?.diff !== null ? best : null };
+    this.result = { truth: truth ?? null, guesses, best: best?.diff !== null ? best : null };
     this.phase = 'reveal';
     this.endsAt = null;
     this.seq++;
     this.ctx.system(
       truth === undefined
         ? `${this.name(this.target)}さんが位置を置かなかったので、このお題は得点なし`
-        : `${this.name(this.target)}さんは ${truth}。一番近かったのは${best ? `${best.name}さん(差${best.diff})` : 'なし'}`,
+        : `${this.name(this.target)}さんは ${truth}。一番近かったのは${best ? `${best.name}さん(差${best.diff})` : 'なし'}${guesses.some((g) => g.exact) ? `。ぴったり賞:${guesses.filter((g) => g.exact).map((g) => `${g.name}さん`).join('・')}(+${EXACT_BONUS})` : ''}`,
     );
     this.ctx.update();
   }
@@ -226,8 +229,8 @@ module.exports = {
   name: '価値観スライダー',
   tagline: '「計画派⇔行き当たりばったり」、あの人はどのへん?近いほど得点。',
   description:
-    '答える人が、両端のある物差しに自分の位置を0〜100でこっそり置きます。ほかの人は「あの人ならこのへん」と予想して置き、近いほど得点(差5以内で5点)。' +
-    '物差しは候補から選ぶか、答える人が自分で書けます。答えた人にも、よく分かってもらえた人数だけ得点が入ります。',
+    '答える人が、両端のある物差しに自分の位置を0〜100でこっそり置きます。ほかの人は「あの人ならこのへん」と予想して置き、近いほど得点(差5以内で5点)。ぴったり当てたら+3点のボーナス(0や100もOK)。' +
+    '物差しは候補から選ぶか、答える人が自分で書けます。答える人には得点は入りません。',
   minPlayers: 3,
   maxPlayers: 10,
   cpu: false,
